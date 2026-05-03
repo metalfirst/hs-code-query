@@ -4,382 +4,566 @@
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0, user-scalable=yes">
     <title>HS编码智能查询系统</title>
-    <link rel="stylesheet" href="{{ url_for('static', filename='style.css') }}">
+    <style>
+        * {
+            box-sizing: border-box;
+            margin: 0;
+            padding: 0;
+        }
+
+        body {
+            font-family: 'Segoe UI', Tahoma, Geneva, Verdana, sans-serif;
+            background: #f0f2f5;
+            padding: 20px;
+            color: #1e2a3a;
+        }
+
+        .container {
+            max-width: 1400px;
+            margin: 0 auto;
+        }
+
+        .card {
+            background: white;
+            border-radius: 20px;
+            box-shadow: 0 8px 20px rgba(0,0,0,0.05);
+            padding: 24px 28px;
+            margin-bottom: 30px;
+            transition: all 0.2s ease;
+        }
+
+        .card h2 {
+            font-size: 1.6rem;
+            margin-bottom: 20px;
+            border-left: 5px solid #2c7da0;
+            padding-left: 16px;
+            color: #0b3b49;
+        }
+
+        .form-grid {
+            display: grid;
+            grid-template-columns: repeat(auto-fit, minmax(280px, 1fr));
+            gap: 24px;
+            margin-bottom: 20px;
+        }
+
+        .form-group {
+            display: flex;
+            flex-direction: column;
+            gap: 8px;
+        }
+
+        .form-group label {
+            font-weight: 600;
+            color: #2c3e50;
+            font-size: 0.9rem;
+        }
+
+        .form-group label .required {
+            color: #e63946;
+            margin-left: 4px;
+        }
+
+        input, textarea, select {
+            padding: 12px 14px;
+            border: 1px solid #cbd5e1;
+            border-radius: 12px;
+            font-size: 0.95rem;
+            transition: 0.2s;
+            font-family: inherit;
+            background: #fff;
+        }
+
+        input:focus, textarea:focus {
+            outline: none;
+            border-color: #2c7da0;
+            box-shadow: 0 0 0 3px rgba(44,125,160,0.2);
+        }
+
+        textarea {
+            resize: vertical;
+            min-height: 80px;
+        }
+
+        .btn {
+            background: #2c7da0;
+            color: white;
+            border: none;
+            padding: 12px 24px;
+            border-radius: 40px;
+            font-weight: 600;
+            cursor: pointer;
+            transition: 0.2s;
+            font-size: 1rem;
+            display: inline-flex;
+            align-items: center;
+            gap: 8px;
+            justify-content: center;
+        }
+
+        .btn:hover {
+            background: #1f5e7a;
+            transform: translateY(-1px);
+        }
+
+        .btn-secondary {
+            background: #475569;
+        }
+        .btn-secondary:hover {
+            background: #334155;
+        }
+
+        .btn-outline {
+            background: transparent;
+            border: 1px solid #2c7da0;
+            color: #2c7da0;
+        }
+        .btn-outline:hover {
+            background: #e6f4f9;
+        }
+
+        .upload-area {
+            border: 2px dashed #cbd5e1;
+            border-radius: 20px;
+            padding: 20px;
+            text-align: center;
+            background: #fafcff;
+            cursor: pointer;
+            transition: 0.2s;
+        }
+        .upload-area:hover {
+            border-color: #2c7da0;
+            background: #f0f9ff;
+        }
+        .image-preview {
+            margin-top: 15px;
+            max-width: 100%;
+            display: flex;
+            justify-content: center;
+        }
+        .image-preview img {
+            max-width: 100%;
+            max-height: 160px;
+            border-radius: 12px;
+            box-shadow: 0 2px 8px rgba(0,0,0,0.1);
+        }
+
+        .results-grid {
+            display: flex;
+            flex-direction: column;
+            gap: 20px;
+            margin-top: 20px;
+        }
+
+        .result-item {
+            background: #f8fafc;
+            border-radius: 20px;
+            padding: 20px;
+            border-left: 6px solid #2c7da0;
+            transition: 0.1s;
+        }
+        .result-item h3 {
+            font-size: 1.3rem;
+            margin-bottom: 8px;
+            color: #0f172a;
+        }
+        .hs-code {
+            font-family: monospace;
+            font-size: 1.2rem;
+            font-weight: bold;
+            background: #e2e8f0;
+            display: inline-block;
+            padding: 4px 12px;
+            border-radius: 30px;
+            margin-bottom: 12px;
+        }
+        .tax-info {
+            display: flex;
+            flex-wrap: wrap;
+            gap: 16px;
+            margin: 12px 0;
+            font-size: 0.9rem;
+        }
+        .badge {
+            background: #e2e8f0;
+            border-radius: 40px;
+            padding: 4px 12px;
+            font-size: 0.8rem;
+            font-weight: 500;
+        }
+        .match-reason {
+            font-size: 0.85rem;
+            color: #2d6a4f;
+            margin-top: 10px;
+            padding-top: 8px;
+            border-top: 1px solid #cbd5e1;
+        }
+        .loading {
+            text-align: center;
+            padding: 30px;
+            font-style: italic;
+            color: #5e6f8d;
+        }
+        .alert {
+            padding: 12px 18px;
+            border-radius: 14px;
+            margin-bottom: 20px;
+        }
+        .alert-error {
+            background: #ffe6e5;
+            border-left: 4px solid #e63946;
+            color: #b91c1c;
+        }
+        .alert-success {
+            background: #e0f2e9;
+            border-left: 4px solid #2e7d64;
+            color: #14532d;
+        }
+        .alert-warning {
+            background: #fff3e0;
+            border-left: 4px solid #f59e0b;
+            color: #92400e;
+        }
+        .flex-between {
+            display: flex;
+            justify-content: space-between;
+            align-items: center;
+            flex-wrap: wrap;
+            gap: 12px;
+        }
+        hr {
+            margin: 16px 0;
+            border: none;
+            height: 1px;
+            background: #e2e8f0;
+        }
+        footer {
+            text-align: center;
+            margin-top: 30px;
+            font-size: 0.8rem;
+            color: #5e6f8d;
+        }
+        @media (max-width: 680px) {
+            .card {
+                padding: 18px;
+            }
+            .btn {
+                width: 100%;
+            }
+        }
+        code {
+            background: #f1f5f9;
+            padding: 2px 6px;
+            border-radius: 8px;
+            font-family: monospace;
+            font-size: 0.85rem;
+        }
+    </style>
 </head>
 <body>
-    <div class="container">
-        <header>
-            <h1>📦 HS编码智能查询系统</h1>
-            <p>输入商品信息，获取推荐HS编码及监管条件</p>
-        </header>
-
-        <form id="searchForm">
-            <!-- 货物描述（必填） -->
-            <div class="form-group">
-                <label for="description">
-                    货物描述 <span class="required">*</span>
-                    <span class="hint">请尽可能详细描述产品功能、用途、结构特征</span>
-                </label>
-                <textarea id="description" name="description" rows="4" 
-                          placeholder="示例：折叠合成木质儿童写字桌，适用于6-12岁儿童，桌面可调节倾斜角度，带抽屉储物功能，非卧室使用，主要由中密度纤维板(MDF)制成"
-                          required></textarea>
-                <div class="example-hint">
-                    💡 提示：包含材质、用途、是否折叠、使用场景等信息可获得更准确结果
-                </div>
-            </div>
-
-            <!-- 主要材质（必填） -->
-            <div class="form-group">
-                <label for="material">
-                    主要材质 <span class="required">*</span>
-                    <span class="hint">选择或输入主要材质</span>
-                </label>
-                <div class="material-input-group">
-                    <select id="materialSelect">
-                        <option value="">选择常见材质...</option>
-                        <option value="木质（实木/人造板/MDF/刨花板）">木质（实木/人造板/MDF/刨花板）</option>
-                        <option value="塑料（PP/ABS/PE/PVC）">塑料（PP/ABS/PE/PVC）</option>
-                        <option value="金属（铁/不锈钢/铝/合金）">金属（铁/不锈钢/铝/合金）</option>
-                        <option value="纺织物/布艺">纺织物/布艺</option>
-                        <option value="皮革/人造革">皮革/人造革</option>
-                        <option value="玻璃/陶瓷">玻璃/陶瓷</option>
-                        <option value="石材/大理石">石材/大理石</option>
-                        <option value="其他材料">其他材料</option>
-                    </select>
-                    <input type="text" id="material" name="material" placeholder="或手动输入具体材质，如：中密度纤维板(MDF)" />
-                </div>
-            </div>
-
-            <!-- 尺寸（选填） -->
-            <div class="form-group">
-                <label for="dimensions">
-                    尺寸 <span class="optional">选填</span>
-                    <span class="hint">长、宽、高、厚度等</span>
-                </label>
-                <input type="text" id="dimensions" name="dimensions" 
-                       placeholder="例如：长120cm × 宽60cm × 高75cm，厚度1.8cm" />
-            </div>
-
-            <!-- 图片上传（选填） -->
-            <div class="form-group">
-                <label for="image">
-                    产品图片 <span class="optional">选填</span>
-                    <span class="hint">上传产品图片辅助识别（支持jpg、png）</span>
-                </label>
-                <div class="upload-area" id="uploadArea">
-                    <input type="file" id="image" name="image" accept="image/*" style="display: none;" />
-                    <div class="upload-placeholder" id="uploadPlaceholder">
-                        📸 点击或拖拽图片到此处上传
-                        <span class="upload-hint">支持jpg、png格式，最大5MB</span>
-                    </div>
-                    <div class="upload-preview" id="uploadPreview" style="display: none;">
-                        <img id="previewImg" src="" alt="预览图片" />
-                        <button type="button" id="removeImageBtn" class="remove-btn">✕</button>
-                    </div>
-                </div>
-                <div id="uploadStatus" class="upload-status"></div>
-            </div>
-
-            <!-- 提交按钮 -->
-            <div class="form-actions">
-                <button type="submit" id="submitBtn">
-                    <span class="btn-text">🔍 查询HS编码</span>
-                    <span class="btn-loading" style="display: none;">查询中...</span>
-                </button>
-                <button type="button" id="resetBtn" class="btn-secondary">重置</button>
-            </div>
-        </form>
-
-        <!-- 结果区域 -->
-        <div id="results" class="results" style="display: none;">
-            <h2>📋 查询结果</h2>
-            <div id="resultsList"></div>
-            <div class="disclaimer">
-                <strong>免责声明</strong><br />
-                本查询结果仅供参考，最终HS编码归类以海关现场认定为准。建议在正式报关前咨询专业报关人员。
-            </div>
-        </div>
-
-        <!-- 加载状态 -->
-        <div id="loading" class="loading" style="display: none;">
-            <div class="spinner"></div>
-            <p>正在分析商品信息，智能匹配HS编码...</p>
-        </div>
-
-        <!-- 错误提示 -->
-        <div id="error" class="error" style="display: none;"></div>
+<div class="container">
+    <div style="margin-bottom: 20px;">
+        <h1 style="color: #0b3b49;">📦 HS编码智能归类系统</h1>
+        <p style="color: #334155;">基于商品描述、材质及图片的HS编码推荐 / 支持Excel批量导入最新税则</p>
     </div>
 
-    <script>
-        let uploadedFilename = null;
+    <!-- 查询卡片 -->
+    <div class="card">
+        <h2>🔍 查询HS编码</h2>
+        <div class="form-grid">
+            <div class="form-group">
+                <label>货物描述 <span class="required">*</span></label>
+                <textarea id="description" placeholder="例如：儿童学习写字桌，可升降，带书架" rows="2"></textarea>
+            </div>
+            <div class="form-group">
+                <label>主要材质 <span class="required">*</span></label>
+                <input type="text" id="material" placeholder="例如：实木、塑料、金属、人造板" value="木质">
+            </div>
+            <div class="form-group">
+                <label>尺寸（选填）</label>
+                <input type="text" id="dimensions" placeholder="例如：120cm x 60cm x 75cm">
+            </div>
+            <div class="form-group">
+                <label>商品照片（辅助识别，选填）</label>
+                <div class="upload-area" id="uploadArea">
+                    📸 点击或拖拽上传图片 (jpg/png)
+                    <input type="file" id="imageInput" accept="image/jpeg,image/png,image/jpg,image/gif" style="display: none;">
+                </div>
+                <div class="image-preview" id="imagePreview"></div>
+                <input type="hidden" id="uploadedImageName" value="">
+            </div>
+        </div>
+        <div class="flex-between">
+            <button class="btn" id="searchBtn">✨ 开始查询</button>
+            <button class="btn btn-outline" id="clearBtn">清空表单</button>
+        </div>
+        <div id="queryStatus"></div>
+    </div>
 
-        // 图片上传区域处理
-        const uploadArea = document.getElementById('uploadArea');
-        const fileInput = document.getElementById('image');
-        const uploadPlaceholder = document.getElementById('uploadPlaceholder');
-        const uploadPreview = document.getElementById('uploadPreview');
-        const previewImg = document.getElementById('previewImg');
-        const removeImageBtn = document.getElementById('removeImageBtn');
-        const uploadStatus = document.getElementById('uploadStatus');
+    <!-- 查询结果展示 -->
+    <div class="card" id="resultCard" style="display: none;">
+        <h2>📋 推荐HS编码</h2>
+        <div id="resultsContainer" class="results-grid"></div>
+    </div>
 
-        uploadArea.addEventListener('click', () => {
-            fileInput.click();
-        });
+    <!-- Excel导入卡片 -->
+    <div class="card">
+        <h2>📂 批量导入HS编码表 (Excel)</h2>
+        <p style="margin-bottom: 16px; color: #334155;">支持 .xlsx / .xls / .csv 格式，将自动更新数据库中的HS编码数据。</p>
+        <div class="flex-between">
+            <label class="btn btn-secondary" style="cursor: pointer; display: inline-block;">
+                📎 选择Excel文件
+                <input type="file" id="excelFileInput" accept=".xlsx, .xls, .csv" style="display: none;">
+            </label>
+            <button class="btn" id="importExcelBtn">⬆️ 上传并导入数据库</button>
+        </div>
+        <div id="importStatus" style="margin-top: 20px;"></div>
+    </div>
+    <footer>基于2026年海关税则数据 | 匹配算法持续优化，仅供关务参考</footer>
+</div>
 
-        // 拖拽上传
-        uploadArea.addEventListener('dragover', (e) => {
-            e.preventDefault();
-            uploadArea.classList.add('drag-over');
-        });
+<script>
+    // DOM 元素
+    const descriptionEl = document.getElementById('description');
+    const materialEl = document.getElementById('material');
+    const dimensionsEl = document.getElementById('dimensions');
+    const imageInput = document.getElementById('imageInput');
+    const uploadArea = document.getElementById('uploadArea');
+    const imagePreview = document.getElementById('imagePreview');
+    const uploadedImageName = document.getElementById('uploadedImageName');
+    const searchBtn = document.getElementById('searchBtn');
+    const clearBtn = document.getElementById('clearBtn');
+    const resultCard = document.getElementById('resultCard');
+    const resultsContainer = document.getElementById('resultsContainer');
+    const queryStatus = document.getElementById('queryStatus');
+    const excelFileInput = document.getElementById('excelFileInput');
+    const importExcelBtn = document.getElementById('importExcelBtn');
+    const importStatus = document.getElementById('importStatus');
 
-        uploadArea.addEventListener('dragleave', () => {
-            uploadArea.classList.remove('drag-over');
-        });
+    let currentImageFile = null;
 
-        uploadArea.addEventListener('drop', (e) => {
-            e.preventDefault();
-            uploadArea.classList.remove('drag-over');
-            const file = e.dataTransfer.files[0];
-            if (file && file.type.startsWith('image/')) {
-                handleImageUpload(file);
-            } else {
-                showUploadStatus('请上传图片文件', 'error');
-            }
-        });
+    // 图片上传区域事件
+    uploadArea.addEventListener('click', () => imageInput.click());
+    uploadArea.addEventListener('dragover', (e) => {
+        e.preventDefault();
+        uploadArea.style.borderColor = '#2c7da0';
+    });
+    uploadArea.addEventListener('dragleave', () => {
+        uploadArea.style.borderColor = '#cbd5e1';
+    });
+    uploadArea.addEventListener('drop', (e) => {
+        e.preventDefault();
+        uploadArea.style.borderColor = '#cbd5e1';
+        const files = e.dataTransfer.files;
+        if (files.length > 0 && files[0].type.startsWith('image/')) {
+            imageInput.files = files;
+            handleImageUpload(files[0]);
+        } else {
+            showTemporaryMessage(queryStatus, '请拖放图片文件', 'error');
+        }
+    });
 
-        fileInput.addEventListener('change', (e) => {
-            if (e.target.files.length > 0) {
-                handleImageUpload(e.target.files[0]);
-            }
-        });
+    imageInput.addEventListener('change', (e) => {
+        if (e.target.files.length > 0) {
+            handleImageUpload(e.target.files[0]);
+        }
+    });
 
-        removeImageBtn.addEventListener('click', (e) => {
-            e.stopPropagation();
-            resetImageUpload();
-        });
+    async function handleImageUpload(file) {
+        if (!file) return;
+        const formData = new FormData();
+        formData.append('image', file);
 
-        function handleImageUpload(file) {
-            if (file.size > 5 * 1024 * 1024) {
-                showUploadStatus('图片大小不能超过5MB', 'error');
-                return;
-            }
-
-            const formData = new FormData();
-            formData.append('image', file);
-
-            showUploadStatus('上传中...', 'info');
-            
-            fetch('/api/upload', {
+        try {
+            const response = await fetch('/api/upload', {
                 method: 'POST',
                 body: formData
-            })
-            .then(res => res.json())
-            .then(data => {
-                if (data.success) {
-                    uploadedFilename = data.filename;
-                    const reader = new FileReader();
-                    reader.onload = (e) => {
-                        previewImg.src = e.target.result;
-                        uploadPlaceholder.style.display = 'none';
-                        uploadPreview.style.display = 'flex';
-                        showUploadStatus('图片上传成功', 'success');
-                    };
-                    reader.readAsDataURL(file);
-                } else {
-                    showUploadStatus('上传失败：' + (data.error || '未知错误'), 'error');
-                }
-            })
-            .catch(err => {
-                showUploadStatus('上传失败：网络错误', 'error');
             });
+            const data = await response.json();
+            if (data.success) {
+                currentImageFile = file;
+                uploadedImageName.value = data.filename || '';
+                const reader = new FileReader();
+                reader.onload = (e) => {
+                    imagePreview.innerHTML = `<img src="${e.target.result}" alt="预览图">`;
+                };
+                reader.readAsDataURL(file);
+                showTemporaryMessage(queryStatus, '图片上传成功', 'success');
+            } else {
+                showTemporaryMessage(queryStatus, '图片上传失败: ' + (data.error || '未知错误'), 'error');
+                clearImagePreview();
+            }
+        } catch (err) {
+            console.error(err);
+            showTemporaryMessage(queryStatus, '图片上传网络错误', 'error');
+            clearImagePreview();
+        }
+    }
+
+    function clearImagePreview() {
+        imagePreview.innerHTML = '';
+        uploadedImageName.value = '';
+        currentImageFile = null;
+        imageInput.value = '';
+    }
+
+    function showTemporaryMessage(container, text, type = 'info') {
+        const alertDiv = document.createElement('div');
+        alertDiv.className = `alert alert-${type === 'error' ? 'error' : type === 'warning' ? 'warning' : 'success'}`;
+        alertDiv.innerText = text;
+        container.appendChild(alertDiv);
+        setTimeout(() => {
+            if (container.contains(alertDiv)) container.removeChild(alertDiv);
+        }, 4000);
+    }
+
+    clearBtn.addEventListener('click', () => {
+        descriptionEl.value = '';
+        materialEl.value = '';
+        dimensionsEl.value = '';
+        clearImagePreview();
+        resultCard.style.display = 'none';
+        queryStatus.innerHTML = '';
+    });
+
+    // 查询HS编码
+    searchBtn.addEventListener('click', async () => {
+        const description = descriptionEl.value.trim();
+        const material = materialEl.value.trim();
+        const dimensions = dimensionsEl.value.trim();
+
+        if (!description) {
+            showTemporaryMessage(queryStatus, '请填写货物描述', 'error');
+            return;
+        }
+        if (!material) {
+            showTemporaryMessage(queryStatus, '请填写主要材质', 'error');
+            return;
         }
 
-        function resetImageUpload() {
-            uploadedFilename = null;
-            fileInput.value = '';
-            uploadPlaceholder.style.display = 'flex';
-            uploadPreview.style.display = 'none';
-            previewImg.src = '';
-            uploadStatus.style.display = 'none';
+        resultCard.style.display = 'block';
+        resultsContainer.innerHTML = '<div class="loading">🔎 智能匹配中，请稍候...</div>';
+
+        const requestBody = {
+            description: description,
+            material: material,
+            dimensions: dimensions
+        };
+
+        try {
+            const response = await fetch('/api/search', {
+                method: 'POST',
+                headers: { 'Content-Type': 'application/json' },
+                body: JSON.stringify(requestBody)
+            });
+            const data = await response.json();
+            if (data.success && data.results && data.results.length > 0) {
+                renderResults(data.results);
+            } else {
+                resultsContainer.innerHTML = '<div class="alert alert-error">未找到匹配的HS编码，请尝试更具体的描述或材质。</div>';
+            }
+        } catch (err) {
+            console.error(err);
+            resultsContainer.innerHTML = '<div class="alert alert-error">请求失败，请检查网络或后端服务。</div>';
         }
+    });
 
-        function showUploadStatus(msg, type) {
-            uploadStatus.textContent = msg;
-            uploadStatus.className = 'upload-status ' + type;
-            uploadStatus.style.display = 'block';
-            setTimeout(() => {
-                if (type !== 'error') {
-                    uploadStatus.style.display = 'none';
-                }
-            }, 3000);
+    function renderResults(results) {
+        if (!results.length) {
+            resultsContainer.innerHTML = '<div class="alert">暂无推荐结果</div>';
+            return;
         }
-
-        // 材质选择联动
-        const materialSelect = document.getElementById('materialSelect');
-        const materialInput = document.getElementById('material');
-
-        materialSelect.addEventListener('change', () => {
-            if (materialSelect.value) {
-                materialInput.value = materialSelect.value;
-            }
-        });
-
-        // 表单提交
-        const form = document.getElementById('searchForm');
-        const submitBtn = document.getElementById('submitBtn');
-        const resetBtn = document.getElementById('resetBtn');
-        const loadingDiv = document.getElementById('loading');
-        const resultsDiv = document.getElementById('results');
-        const errorDiv = document.getElementById('error');
-        const resultsList = document.getElementById('resultsList');
-
-        form.addEventListener('submit', async (e) => {
-            e.preventDefault();
-            
-            const description = document.getElementById('description').value.trim();
-            const material = document.getElementById('material').value.trim();
-            const dimensions = document.getElementById('dimensions').value.trim();
-
-            if (!description) {
-                showError('请填写货物描述');
-                return;
-            }
-            if (!material) {
-                showError('请填写主要材质');
-                return;
-            }
-
-            // 显示加载状态
-            loadingDiv.style.display = 'block';
-            resultsDiv.style.display = 'none';
-            errorDiv.style.display = 'none';
-            submitBtn.disabled = true;
-
-            const requestData = {
-                description: description,
-                material: material,
-                dimensions: dimensions
-            };
-
-            if (uploadedFilename) {
-                requestData.image = uploadedFilename;
-            }
-
-            try {
-                const response = await fetch('/api/search', {
-                    method: 'POST',
-                    headers: {
-                        'Content-Type': 'application/json'
-                    },
-                    body: JSON.stringify(requestData)
-                });
-
-                const data = await response.json();
-
-                if (data.success) {
-                    displayResults(data.results);
-                } else {
-                    showError(data.error || '查询失败，请稍后重试');
-                }
-            } catch (err) {
-                showError('网络错误，请检查连接后重试');
-            } finally {
-                loadingDiv.style.display = 'none';
-                submitBtn.disabled = false;
-            }
-        });
-
-        function displayResults(results) {
-            if (!results || results.length === 0) {
-                resultsList.innerHTML = '<div class="no-results">未找到匹配的HS编码，请尝试更详细的描述</div>';
-                resultsDiv.style.display = 'block';
-                return;
-            }
-
-            let html = '';
-            results.forEach((item, index) => {
-                const confidence = index === 0 ? '高' : (index === 1 ? '中' : '低');
-                const confidenceClass = index === 0 ? 'high' : (index === 1 ? 'medium' : 'low');
-                
-                html += `
-                    <div class="result-card">
-                        <div class="result-header">
-                            <div class="result-code">
-                                <span class="code-label">HS编码</span>
-                                <span class="code-value">${escapeHtml(item.hs_code)}</span>
-                            </div>
-                            <div class="confidence ${confidenceClass}">
-                                推荐度：${confidence}
-                            </div>
-                        </div>
-                        <div class="result-name">${escapeHtml(item.name)}</div>
-                        <div class="result-description">${escapeHtml(item.description || '暂无详细描述')}</div>
-                        <div class="result-section">
-                            <div class="section-title">📖 简短说明</div>
-                            <div class="result-brief">${escapeHtml(item.brief)}</div>
-                        </div>
-                        <div class="result-section">
-                            <div class="section-title">🛂 监管条件</div>
-                            <div class="result-supervision">
-                                <span class="supervision-code">${escapeHtml(item.supervision_conditions || '无')}</span>
-                                <span class="supervision-desc">${escapeHtml(item.supervision_description || '无特殊监管要求')}</span>
-                            </div>
-                        </div>
-                        <div class="result-details">
-                            <div class="detail-item">
-                                <span class="detail-label">进口优惠税率</span>
-                                <span class="detail-value">${escapeHtml(item.import_tax_rate || '-')}</span>
-                            </div>
-                            <div class="detail-item">
-                                <span class="detail-label">增值税率</span>
-                                <span class="detail-value">${escapeHtml(item.vat_rate || '-')}</span>
-                            </div>
-                            <div class="detail-item">
-                                <span class="detail-label">出口退税率</span>
-                                <span class="detail-value">${escapeHtml(item.export_rebate_rate || '-')}</span>
-                            </div>
-                        </div>
-                        ${item.match_reasons && item.match_reasons.length > 0 ? `
-                        <div class="result-section">
-                            <div class="section-title">✅ 匹配依据</div>
-                            <ul class="match-reasons">
-                                ${item.match_reasons.map(reason => `<li>${escapeHtml(reason)}</li>`).join('')}
-                            </ul>
-                        </div>
-                        ` : ''}
+        let html = '';
+        results.forEach((item) => {
+            html += `
+                <div class="result-item">
+                    <div class="flex-between">
+                        <h3>${escapeHtml(item.name || '商品')}</h3>
+                        <span class="hs-code">${escapeHtml(item.hs_code)}</span>
                     </div>
-                `;
-            });
-
-            resultsList.innerHTML = html;
-            resultsDiv.style.display = 'block';
-            window.scrollTo({ top: resultsDiv.offsetTop - 20, behavior: 'smooth' });
-        }
-
-        function escapeHtml(text) {
-            if (!text) return '';
-            const div = document.createElement('div');
-            div.textContent = text;
-            return div.innerHTML;
-        }
-
-        function showError(message) {
-            errorDiv.textContent = message;
-            errorDiv.style.display = 'block';
-            resultsDiv.style.display = 'none';
-            setTimeout(() => {
-                errorDiv.style.display = 'none';
-            }, 5000);
-        }
-
-        // 重置表单
-        resetBtn.addEventListener('click', () => {
-            form.reset();
-            resetImageUpload();
-            resultsDiv.style.display = 'none';
-            errorDiv.style.display = 'none';
-            materialSelect.value = '';
+                    <div class="tax-info">
+                        <span class="badge">📈 进口关税: ${item.import_tax_rate || '—'}</span>
+                        <span class="badge">🧾 增值税: ${item.vat_rate || '—'}</span>
+                        <span class="badge">💰 出口退税: ${item.export_rebate_rate || '—'}</span>
+                        <span class="badge">⚙️ 监管条件: ${item.supervision_conditions || '无'}</span>
+                    </div>
+                    <div>${escapeHtml(item.description || '暂无详细描述')}</div>
+                    ${item.supervision_description ? `<div><small>📌 监管说明：${escapeHtml(item.supervision_description)}</small></div>` : ''}
+                    ${item.brief ? `<div class="match-reason">📢 ${escapeHtml(item.brief)}</div>` : ''}
+                    ${item.match_reasons && item.match_reasons.length ? `<div class="match-reason">🎯 匹配依据：${item.match_reasons.join('；')}</div>` : ''}
+                </div>
+            `;
         });
-    </script>
+        resultsContainer.innerHTML = html;
+    }
+
+    function escapeHtml(str) {
+        if (!str) return '';
+        return str.replace(/[&<>]/g, function(m) {
+            if (m === '&') return '&amp;';
+            if (m === '<') return '&lt;';
+            if (m === '>') return '&gt;';
+            return m;
+        }).replace(/[\uD800-\uDBFF][\uDC00-\uDFFF]/g, function(c) {
+            return c;
+        });
+    }
+
+    // Excel导入逻辑（支持 403 错误处理）
+    importExcelBtn.addEventListener('click', async () => {
+        const file = excelFileInput.files[0];
+        if (!file) {
+            showTemporaryMessage(importStatus, '请先选择一个Excel文件', 'error');
+            return;
+        }
+        if (file.size > 5 * 1024 * 1024) {
+            showTemporaryMessage(importStatus, '文件大小不能超过5MB', 'error');
+            return;
+        }
+        const allowedExt = /\.(xlsx|xls|csv)$/i;
+        if (!allowedExt.test(file.name)) {
+            showTemporaryMessage(importStatus, '请上传 .xlsx, .xls 或 .csv 格式文件', 'error');
+            return;
+        }
+
+        const formData = new FormData();
+        formData.append('file', file);
+
+        importStatus.innerHTML = '<div class="loading">⏳ 正在处理并导入数据库，请勿关闭页面...</div>';
+        try {
+            const resp = await fetch('/api/import_excel', {
+                method: 'POST',
+                body: formData
+            });
+            const result = await resp.json();
+            if (resp.status === 403 || (result.error && result.error.includes('导入功能已禁用'))) {
+                importStatus.innerHTML = `
+                    <div class="alert alert-warning">
+                        ❌ 导入功能已禁用。<br>
+                        如需更新数据，请使用命令行工具：<br>
+                        <code>python admin_import.py 文件.xlsx</code>
+                    </div>`;
+            } else if (result.success) {
+                importStatus.innerHTML = `<div class="alert alert-success">✅ ${result.message || '导入成功'}</div>`;
+                excelFileInput.value = ''; // 清空选择
+            } else {
+                importStatus.innerHTML = `<div class="alert alert-error">❌ 导入失败: ${result.error || '未知错误'}</div>`;
+            }
+        } catch (err) {
+            console.error(err);
+            importStatus.innerHTML = `<div class="alert alert-error">❌ 网络错误或服务异常</div>`;
+        }
+    });
+
+    // 点击label触发文件选择
+    document.querySelector('label[for="excelFileInput"]')?.addEventListener('click', () => {
+        excelFileInput.click();
+    });
+    excelFileInput.addEventListener('change', (e) => {
+        if (e.target.files.length) {
+            showTemporaryMessage(importStatus, `已选择: ${e.target.files[0].name}`, 'success');
+        }
+    });
+</script>
 </body>
 </html>
