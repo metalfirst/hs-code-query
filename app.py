@@ -1,377 +1,380 @@
+# -*- coding: utf-8 -*-
+import os
+import re
+import sqlite3
+import uuid
+import base64
+import json
+from datetime import datetime
+from functools import wraps
+
 from flask import Flask, render_template, request, jsonify
 from flask_cors import CORS
-import sqlite3
-import json
-import re
-import os
-import hashlib
-from werkzeug.utils import secure_filename
 from PIL import Image
-import pandas as pd
+import requests  # 用于调用 DeepSeek API
 
 app = Flask(__name__)
 CORS(app)
 
-# ==================== 配置 ====================
-app.config['UPLOAD_FOLDER'] = 'uploads'
-app.config['MAX_CONTENT_LENGTH'] = 5 * 1024 * 1024  # 5MB
-ALLOWED_EXTENSIONS = {'png', 'jpg', 'jpeg', 'gif'}
+# ============================================================
+# 配置
+# ============================================================
+DB_PATH = 'hs_data.db'
+UPLOAD_FOLDER = 'uploads'
+ALLOWED_EXTENSIONS = {'png', 'jpg', 'jpeg', 'gif', 'webp'}
+MAX_CONTENT_LENGTH = 16 * 1024 * 1024  # 16MB
 
-# 是否允许通过 Web 上传 Excel（默认 False，生产环境建议保持关闭）
-ALLOW_WEB_IMPORT = os.environ.get('ALLOW_WEB_IMPORT', 'False').lower() == 'true'
+# DeepSeek API 配置
+DEEPSEEK_API_KEY = "你的API_KEY"  # ← 请替换为你的真实 Key
+DEEPSEEK_API_URL = "https://api.deepseek.com/chat/completions"
+DEEPSEEK_MODEL = "deepseek-chat"  # 支持视觉的模型
 
-# 确保上传目录存在
-os.makedirs(app.config['UPLOAD_FOLDER'], exist_ok=True)
+os.makedirs(UPLOAD_FOLDER, exist_ok=True)
+app.config['UPLOAD_FOLDER'] = UPLOAD_FOLDER
+app.config['MAX_CONTENT_LENGTH'] = MAX_CONTENT_LENGTH
 
-# ==================== 数据库初始化 ====================
-def init_db():
-    conn = sqlite3.connect('hs_data.db')
-    cursor = conn.cursor()
-    cursor.execute('''
-    CREATE TABLE IF NOT EXISTS hs_codes (
-        id INTEGER PRIMARY KEY AUTOINCREMENT,
-        hs_code TEXT NOT NULL,
-        name TEXT NOT NULL,
-        description TEXT,
-        category TEXT,
-        subcategory TEXT,
-        supervision_conditions TEXT,
-        supervision_description TEXT,
-        import_tax_rate TEXT,
-        vat_rate TEXT,
-        export_rebate_rate TEXT,
-        keywords TEXT,
-        material_constraint TEXT,
-        parent_code TEXT
-    )
-    ''')
-    conn.commit()
-    conn.close()
-    print("数据库表已就绪")
-
-init_db()
-
-# ==================== 辅助函数 ====================
-def get_db_connection():
-    conn = sqlite3.connect('hs_data.db')
+# ============================================================
+# 数据库工具
+# ============================================================
+def get_db():
+    conn = sqlite3.connect(DB_PATH)
     conn.row_factory = sqlite3.Row
     return conn
 
 def allowed_file(filename):
     return '.' in filename and filename.rsplit('.', 1)[1].lower() in ALLOWED_EXTENSIONS
 
-def preprocess_text(text):
+# ============================================================
+# 关键词提取与评分
+# ============================================================
+def extract_keywords_from_text(text):
+    """从文本中提取关键词"""
     if not text:
-        return ""
-    text = re.sub(r'[^\w\s\u4e00-\u9fff]', '', text.lower())
-    words = text.split()
-    stopwords = {'的', '了', '和', '与', '或', '及', '等', '个', '种', '台', '张', '把'}
-    filtered = [w for w in words if w not in stopwords]
-    return ' '.join(filtered)
+        return []
+    parts = re.split(r'[，。；：、；\s/|,;:]+', text)
+    keywords = []
+    for p in parts:
+        p = p.strip()
+        if 1 <= len(p) <= 15:
+            keywords.append(p)
+    return keywords
 
-def extract_features(text, material, dimensions):
-    features = {
-        'keywords': [],
-        'detected_material': None,
-        'dimensions': dimensions
+def extract_material_keywords(material_text):
+    """从材质描述中提取关键词"""
+    if not material_text:
+        return [], '未知'
+    material_text = material_text.strip()
+    material_map = {
+        '木': '木质', '实木': '木质', '板材': '木质', '竹': '竹制', '藤': '藤制',
+        '钢': '钢制', '铁': '铁制', '铝': '铝制', '铜': '铜制', '金属': '金属',
+        '不锈钢': '不锈钢', '合金': '合金',
+        '塑料': '塑料', '树脂': '塑料', '亚克力': '塑料', 'pp': '塑料', 'pe': '塑料', 'pvc': '塑料',
+        '玻璃': '玻璃', '陶瓷': '陶瓷', '石材': '石材', '大理石': '石材',
+        '橡胶': '橡胶', '硅胶': '橡胶',
+        '皮革': '皮革', '真皮': '皮革', 'pu皮': '皮革',
+        '纺织': '纺织', '棉': '纺织', '麻': '纺织', '丝': '纺织', '化纤': '纺织', '涤纶': '纺织', '尼龙': '纺织',
+        '纸': '纸质', '纸板': '纸质',
     }
-    processed = preprocess_text(text)
-    features['keywords'] = processed.split()
-
-    material_keywords = {
-        '木质': ['木', '木质', '木制', '实木', '人造板', '密度板', '刨花板', '中纤板', 'MDF'],
-        '塑料': ['塑料', '塑胶', 'PVC', 'PE', 'PP', 'ABS', '亚克力', '树脂'],
-        '金属': ['金属', '铁', '钢', '不锈钢', '铝', '合金', '铸铁', '铜'],
-        '纺织': ['布', '织物', '纺织', '棉', '毛', '丝', '化纤', '涤纶', '尼龙'],
-        '玻璃': ['玻璃', '水晶', '钢化'],
-        '皮革': ['皮革', '皮', '真皮', 'PU皮', '人造革'],
-        '陶瓷': ['陶瓷', '瓷', '陶'],
-        '石材': ['石', '石材', '大理石', '花岗岩']
-    }
-
-    for material_type, keywords in material_keywords.items():
-        for kw in keywords:
-            if kw in text or (material and kw in material):
-                features['detected_material'] = material_type
-                break
-        if features['detected_material']:
+    detected = '未知'
+    for key, val in material_map.items():
+        if key in material_text:
+            detected = val
             break
-    return features
+    return extract_keywords_from_text(material_text), detected
 
-def search_hs_codes(features, material, top_n=3):
-    conn = get_db_connection()
-    cursor = conn.cursor()
-    cursor.execute("SELECT * FROM hs_codes")
-    all_codes = cursor.fetchall()
-    conn.close()
-
-    keywords = features['keywords']
-    detected_material = features['detected_material']
-    results = []
-
-    for code in all_codes:
-        score = 0
-        match_reasons = []
-        name = code['name'].lower() if code['name'] else ''
-        desc = code['description'].lower() if code['description'] else ''
-        code_keywords = code['keywords'].lower() if code['keywords'] else ''
-
-        for kw in keywords:
-            if kw and len(kw) > 1:
-                if kw in name:
-                    score += 30
-                    match_reasons.append(f"商品名称包含「{kw}」")
-                elif kw in desc or kw in code_keywords:
-                    score += 15
-                    match_reasons.append(f"描述/关键词包含「{kw}」")
-
-        material_constraint = code['material_constraint'] if code['material_constraint'] else ''
-        if detected_material and material_constraint:
-            if detected_material in material_constraint:
-                score += 25
-                match_reasons.append(f"材质「{detected_material}」符合")
-            else:
-                score -= 50
-                match_reasons.append(f"材质「{detected_material}」可能不匹配")
-
-        if material and material_constraint:
-            if any(mat.strip() in material_constraint for mat in material.split(',')):
-                score += 20
-                match_reasons.append(f"材质描述与约束匹配")
-
-        if len(code['hs_code']) >= 10:
+def calculate_match_score(query_desc, query_material, row):
+    """计算匹配分数"""
+    score = 0
+    reasons = []
+    
+    name = row['name'] or ''
+    description = row['description'] or ''
+    db_keywords = row['keywords'] or ''
+    material_constraint = row['material_constraint'] or ''
+    
+    query_keywords = extract_keywords_from_text(query_desc)
+    material_keywords, detected_material = extract_material_keywords(query_material)
+    all_query_words = set(query_keywords + material_keywords)
+    
+    # 1. 商品名称匹配 (40分)
+    name_lower = name.lower()
+    for word in query_keywords:
+        if word.lower() in name_lower:
+            score += 8
+            reasons.append(f'商品名称包含「{word}」')
+    
+    # 2. 关键词匹配 (35分)
+    db_kw_list = [k.strip().lower() for k in db_keywords.split() if k.strip()]
+    for word in all_query_words:
+        if word.lower() in db_kw_list:
             score += 5
+    if db_kw_list:
+        matched_kw = [k for k in all_query_words if k.lower() in db_kw_list]
+        if matched_kw:
+            reasons.append(f'关键词匹配: {", ".join(matched_kw[:3])}')
+    
+    # 3. 材质匹配 (25分)
+    for word in material_keywords:
+        if word in material_constraint or word in description or word in name:
+            score += 8
+            reasons.append(f'材质「{word}」符合')
+    if detected_material != '未知':
+        if detected_material in material_constraint or detected_material in description:
+            score += 10
+            reasons.append(f'材质类型「{detected_material}」匹配')
+    
+    return min(score, 100), reasons[:5]
 
-        if score > 0:
-            results.append({
-                'hs_code': code['hs_code'],
-                'name': code['name'],
-                'description': code['description'],
-                'supervision_conditions': code['supervision_conditions'],
-                'supervision_description': code['supervision_description'],
-                'import_tax_rate': code['import_tax_rate'],
-                'vat_rate': code['vat_rate'],
-                'export_rebate_rate': code['export_rebate_rate'],
-                'score': score,
-                'match_reasons': match_reasons[:3]
-            })
-
-    results.sort(key=lambda x: x['score'], reverse=True)
-    return results[:top_n]
-
-# ==================== 公共导入函数（供命令行复用） ====================
-def import_excel_data(filepath, clear_existing=True):
+# ============================================================
+# DeepSeek API 调用
+# ============================================================
+def analyze_image_with_deepseek(image_path):
     """
-    从 Excel/CSV 文件导入数据到 hs_codes 表
-    :param filepath: 文件路径
-    :param clear_existing: 是否清空现有数据（默认 True）
-    :return: (success, message, inserted_count)
+    使用 DeepSeek API 分析商品图片，提取物品、材质、描述
+    返回格式：
+    {
+        "objects": [{"name": "桌子", "confidence": 0.95}, ...],
+        "materials": [{"name": "实木", "confidence": 0.9}, ...],
+        "raw_description": "一张实木学习桌，带书架"
+    }
     """
-    try:
-        if filepath.endswith('.csv'):
-            df = pd.read_csv(filepath, dtype=str)
-        else:
-            df = pd.read_excel(filepath, sheet_name=0, dtype=str)
+    if DEEPSEEK_API_KEY == "你的API_KEY":
+        raise ValueError("请先在 app.py 中配置 DEEPSEEK_API_KEY")
 
-        column_mapping = {
-            'hs_code': ['商品编码', 'HS编码', 'HS Code', '海关编码', '商品编号'],
-            'name': ['商品名称', '货品名称', '名称'],
-            'description': ['商品描述', '描述', '规格型号', '申报要素', '备注'],
-            'import_tax_rate': ['最惠国税率', '进口关税率', '进口税率'],
-            'vat_rate': ['增值税率', '增值税'],
-            'export_rebate_rate': ['出口退税率', '退税率'],
-            'supervision_conditions': ['监管条件', '监管类别']
-        }
+    # 读取图片并转为 base64
+    with open(image_path, 'rb') as f:
+        image_data = base64.b64encode(f.read()).decode('utf-8')
 
-        mapped_cols = {}
-        for db_field, possible_names in column_mapping.items():
-            for col in df.columns:
-                if col in possible_names or col.strip() in possible_names:
-                    mapped_cols[db_field] = col
-                    break
+    # 获取图片格式
+    ext = image_path.rsplit('.', 1)[-1].lower()
+    mime_map = {'jpg': 'image/jpeg', 'jpeg': 'image/jpeg', 'png': 'image/png', 'gif': 'image/gif', 'webp': 'image/webp'}
+    mime_type = mime_map.get(ext, 'image/jpeg')
 
-        if 'hs_code' not in mapped_cols or 'name' not in mapped_cols:
-            raise ValueError(f'Excel中缺少必要列，检测到的列：{list(df.columns)}')
+    # 构造请求
+    headers = {
+        "Authorization": f"Bearer {DEEPSEEK_API_KEY}",
+        "Content-Type": "application/json"
+    }
 
-        conn = get_db_connection()
-        cursor = conn.cursor()
+    payload = {
+        "model": DEEPSEEK_MODEL,
+        "messages": [
+            {
+                "role": "system",
+                "content": """你是一个专业的海关商品归类助手。请分析用户上传的商品图片，提取以下信息，并严格按照 JSON 格式返回，不要包含任何其他文字：
 
-        if clear_existing:
-            cursor.execute('DELETE FROM hs_codes')
+{
+  "objects": [{"name": "物品名称", "confidence": 0.0~1.0}],
+  "materials": [{"name": "材质名称", "confidence": 0.0~1.0}],
+  "raw_description": "一段简短的中文描述，包含物品名称、材质、主要特征"
+}
 
-        inserted = 0
-        for _, row in df.iterrows():
-            hs_code = str(row[mapped_cols['hs_code']]).strip()
-            name = str(row[mapped_cols['name']]).strip()
-            if not hs_code or hs_code == 'nan' or not name or name == 'nan':
-                continue
+要求：
+1. objects 列出图片中识别到的商品物品（1-3个），confidence 表示确信度
+2. materials 列出推测的材质（1-3种），使用中文（如：实木、不锈钢、塑料、棉、陶瓷等）
+3. raw_description 是一句完整的中文描述，适合用于HS编码搜索
+4. 只返回 JSON，不要带 ```json 标记或任何解释"""
+            },
+            {
+                "role": "user",
+                "content": [
+                    {
+                        "type": "text",
+                        "text": "请分析这张商品图片，提取物品、材质和描述"
+                    },
+                    {
+                        "type": "image_url",
+                        "image_url": {
+                            "url": f"data:{mime_type};base64,{image_data}"
+                        }
+                    }
+                ]
+            }
+        ],
+        "max_tokens": 500,
+        "temperature": 0.3
+    }
 
-            description = ''
-            if 'description' in mapped_cols:
-                description = str(row[mapped_cols['description']])
-                if description == 'nan':
-                    description = ''
+    response = requests.post(DEEPSEEK_API_URL, headers=headers, json=payload, timeout=30)
+    response.raise_for_status()
+    
+    result = response.json()
+    content = result['choices'][0]['message']['content'].strip()
+    
+    # 清理可能的 markdown 标记
+    content = re.sub(r'^```json\s*', '', content)
+    content = re.sub(r'\s*```$', '', content)
+    
+    analysis = json.loads(content)
+    
+    # 确保必要字段存在
+    analysis.setdefault('objects', [])
+    analysis.setdefault('materials', [])
+    analysis.setdefault('raw_description', '')
+    
+    return analysis
 
-            import_tax = ''
-            if 'import_tax_rate' in mapped_cols:
-                val = row[mapped_cols['import_tax_rate']]
-                if pd.notna(val):
-                    import_tax = str(val)
-
-            vat = ''
-            if 'vat_rate' in mapped_cols:
-                val = row[mapped_cols['vat_rate']]
-                if pd.notna(val):
-                    vat = str(val)
-
-            export_rebate = ''
-            if 'export_rebate_rate' in mapped_cols:
-                val = row[mapped_cols['export_rebate_rate']]
-                if pd.notna(val):
-                    export_rebate = str(val)
-
-            supervision = ''
-            if 'supervision_conditions' in mapped_cols:
-                val = row[mapped_cols['supervision_conditions']]
-                if pd.notna(val):
-                    supervision = str(val)
-
-            keywords = re.sub(r'[^\u4e00-\u9fff0-9a-zA-Z]', '', f"{name} {description}")[:80]
-
-            cursor.execute('''
-            INSERT OR REPLACE INTO hs_codes (
-                hs_code, name, description, category, subcategory,
-                supervision_conditions, supervision_description,
-                import_tax_rate, vat_rate, export_rebate_rate,
-                keywords, material_constraint, parent_code
-            ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
-            ''', (
-                hs_code, name, description, '', '',
-                supervision, '',
-                import_tax, vat, export_rebate,
-                keywords, '', ''
-            ))
-            inserted += 1
-
-        conn.commit()
-        conn.close()
-        return True, f'成功导入 {inserted} 条记录', inserted
-    except Exception as e:
-        import traceback
-        traceback.print_exc()
-        return False, str(e), 0
-
-# ==================== 路由 ====================
+# ============================================================
+# 路由：首页
+# ============================================================
 @app.route('/')
 def index():
     return render_template('index.html')
 
-@app.route('/api/upload', methods=['POST'])
-def upload_image():
-    if 'image' not in request.files:
-        return jsonify({'success': False, 'error': 'No image file'}), 400
-
-    file = request.files['image']
-    if file.filename == '':
-        return jsonify({'success': False, 'error': 'No selected file'}), 400
-
-    if file and allowed_file(file.filename):
-        filename = secure_filename(file.filename)
-        unique_name = hashlib.md5(f"{filename}{os.urandom(8)}".encode()).hexdigest()[:16]
-        extension = filename.rsplit('.', 1)[1].lower()
-        saved_name = f"{unique_name}.{extension}"
-        filepath = os.path.join(app.config['UPLOAD_FOLDER'], saved_name)
-        file.save(filepath)
-
-        try:
-            with Image.open(filepath) as img:
-                width, height = img.size
-                image_info = {
-                    'filename': saved_name,
-                    'width': width,
-                    'height': height,
-                    'format': img.format
-                }
-        except Exception as e:
-            image_info = {'filename': saved_name, 'error': str(e)}
-
-        return jsonify({
-            'success': True,
-            'filename': saved_name,
-            'info': image_info
-        })
-
-    return jsonify({'success': False, 'error': 'Invalid file type'}), 400
-
+# ============================================================
+# API：查询HS编码
+# ============================================================
 @app.route('/api/search', methods=['POST'])
 def search():
-    data = request.get_json()
+    data = request.get_json() or {}
     description = data.get('description', '').strip()
     material = data.get('material', '').strip()
-    dimensions = data.get('dimensions', '')
-
-    if not description:
-        return jsonify({'success': False, 'error': '请填写货物描述'}), 400
-    if not material:
-        return jsonify({'success': False, 'error': '请填写主要材质'}), 400
-
-    features = extract_features(description, material, dimensions)
-    results = search_hs_codes(features, material, top_n=3)
-
-    for result in results:
-        brief = f"该编码适用于「{result['name']}」，"
-        if result['match_reasons']:
-            brief += f"匹配依据：{'；'.join(result['match_reasons'])}。"
-        else:
-            brief += "基于关键词和材质匹配。"
-
-        if result['supervision_conditions']:
-            if 'B' in result['supervision_conditions']:
-                brief += "【注意】该编码含有木质成分或动植物产品，出口需办理商检（出境货物通关单）。"
-            elif 'A' in result['supervision_conditions']:
-                brief += "该编码入境需办理入境货物通关单。"
-
-        result['brief'] = brief
-
+    dimensions = data.get('dimensions', '').strip()
+    
+    if not description or not material:
+        return jsonify({'success': False, 'error': '请提供货物描述和材质'}), 400
+    
+    keywords = extract_keywords_from_text(description)
+    material_keywords, detected_material = extract_material_keywords(material)
+    
+    conn = get_db()
+    cursor = conn.cursor()
+    cursor.execute("SELECT * FROM hs_codes")
+    rows = cursor.fetchall()
+    
+    scored_results = []
+    for row in rows:
+        score, reasons = calculate_match_score(description, material, row)
+        if score > 0:
+            scored_results.append({
+                'hs_code': row['hs_code'],
+                'name': row['name'],
+                'description': row['description'],
+                'import_tax_rate': row['import_tax_rate'],
+                'general_import_tax_rate': row['general_import_tax_rate'] if 'general_import_tax_rate' in row.keys() else '',
+                'temporary_import_tax_rate': row['temporary_import_tax_rate'] if 'temporary_import_tax_rate' in row.keys() else '',
+                'consumption_tax_rate': row['consumption_tax_rate'] if 'consumption_tax_rate' in row.keys() else '',
+                'export_tax_rate': row['export_tax_rate'] if 'export_tax_rate' in row.keys() else '',
+                'vat_rate': row['vat_rate'],
+                'export_rebate_rate': row['export_rebate_rate'],
+                'supervision_conditions': row['supervision_conditions'],
+                'supervision_description': row['supervision_description'],
+                'unit_1': row['unit_1'] if 'unit_1' in row.keys() else '',
+                'unit_2': row['unit_2'] if 'unit_2' in row.keys() else '',
+                'match_reasons': reasons,
+                'brief': row['description'][:120] if row['description'] else '',
+                'score': score
+            })
+    
+    scored_results.sort(key=lambda x: x['score'], reverse=True)
+    top_results = scored_results[:3]
+    
+    conn.close()
+    
     return jsonify({
         'success': True,
-        'results': results,
+        'results': top_results,
         'features': {
-            'keywords': features['keywords'][:10],
-            'detected_material': features['detected_material']
+            'keywords': keywords,
+            'detected_material': detected_material,
         }
     })
 
+# ============================================================
+# API：AI 图片分析（新增）
+# ============================================================
+@app.route('/api/analyze_image', methods=['POST'])
+def analyze_image():
+    """接收图片，调用 DeepSeek 进行商品识别"""
+    if 'image' not in request.files:
+        return jsonify({'success': False, 'error': '未找到图片文件'}), 400
+    
+    file = request.files['image']
+    if file.filename == '' or not allowed_file(file.filename):
+        return jsonify({'success': False, 'error': '不支持的文件格式，请上传 JPG/PNG/GIF/WebP'}), 400
+    
+    # 保存临时文件
+    ext = file.filename.rsplit('.', 1)[1].lower()
+    filename = f"analyze_{uuid.uuid4().hex}.{ext}"
+    filepath = os.path.join(app.config['UPLOAD_FOLDER'], filename)
+    file.save(filepath)
+    
+    try:
+        # 调用 DeepSeek 分析
+        analysis = analyze_image_with_deepseek(filepath)
+        return jsonify({
+            'success': True,
+            'analysis': analysis,
+            'filename': filename
+        })
+    except ValueError as e:
+        # API Key 未配置
+        return jsonify({'success': False, 'error': str(e)}), 500
+    except requests.exceptions.RequestException as e:
+        return jsonify({'success': False, 'error': f'DeepSeek API 调用失败: {str(e)}'}), 500
+    except json.JSONDecodeError as e:
+        return jsonify({'success': False, 'error': f'AI 返回格式解析失败，请重试'}), 500
+    except Exception as e:
+        return jsonify({'success': False, 'error': f'分析失败: {str(e)}'}), 500
+    finally:
+        # 清理临时文件
+        if os.path.exists(filepath):
+            try:
+                os.remove(filepath)
+            except:
+                pass
+
+# ============================================================
+# API：上传图片（保留原接口）
+# ============================================================
+@app.route('/api/upload', methods=['POST'])
+def upload_image():
+    if 'image' not in request.files:
+        return jsonify({'success': False, 'error': '未找到图片文件'}), 400
+    
+    file = request.files['image']
+    if file.filename == '' or not allowed_file(file.filename):
+        return jsonify({'success': False, 'error': '不支持的文件格式'}), 400
+    
+    ext = file.filename.rsplit('.', 1)[1].lower()
+    filename = f"{uuid.uuid4().hex}.{ext}"
+    filepath = os.path.join(app.config['UPLOAD_FOLDER'], filename)
+    file.save(filepath)
+    
+    try:
+        img = Image.open(filepath)
+        width, height = img.size
+        img_format = img.format
+    except Exception:
+        width, height, img_format = 0, 0, 'Unknown'
+    
+    return jsonify({
+        'success': True,
+        'filename': filename,
+        'info': {
+            'width': width,
+            'height': height,
+            'format': img_format
+        }
+    })
+
+# ============================================================
+# API：导入Excel（已禁用）
+# ============================================================
 @app.route('/api/import_excel', methods=['POST'])
 def import_excel():
-    if not ALLOW_WEB_IMPORT:
-        return jsonify({'success': False, 'error': '导入功能已禁用，请使用命令行工具（python admin_import.py）更新数据'}), 403
+    return jsonify({
+        'success': False,
+        'error': '导入功能已禁用。如需更新数据，请使用命令行工具：python admin_import.py 文件.xlsx'
+    }), 403
 
-    if 'file' not in request.files:
-        return jsonify({'success': False, 'error': '未接收到文件'}), 400
-
-    file = request.files['file']
-    if file.filename == '':
-        return jsonify({'success': False, 'error': '未选择文件'}), 400
-
-    if not (file.filename.endswith('.xlsx') or file.filename.endswith('.xls') or file.filename.endswith('.csv')):
-        return jsonify({'success': False, 'error': '文件格式错误，需要 .xlsx, .xls 或 .csv 文件'}), 400
-
-    filename = secure_filename(file.filename)
-    filepath = os.path.join(app.config['UPLOAD_FOLDER'], f"import_{filename}")
-    file.save(filepath)
-
-    try:
-        success, message, count = import_excel_data(filepath, clear_existing=True)
-        if success:
-            return jsonify({'success': True, 'message': message, 'total': count})
-        else:
-            return jsonify({'success': False, 'error': message}), 500
-    finally:
-        if os.path.exists(filepath):
-            os.remove(filepath)
-
-# ==================== 启动应用 ====================
+# ============================================================
+# 启动
+# ============================================================
 if __name__ == '__main__':
-    port = int(os.environ.get('PORT', 5000))
-    app.run(debug=False, host='0.0.0.0', port=port)
+    print("=" * 50)
+    print("HS编码智能查询系统启动中...")
+    print(f"DeepSeek API: {'已配置' if DEEPSEEK_API_KEY != '你的API_KEY' else '❌ 未配置，图片分析不可用'}")
+    print("默认地址: http://127.0.0.1:5000")
+    print("=" * 50)
+    app.run(debug=True, host='0.0.0.0', port=5000)
