@@ -2,568 +2,617 @@
 <html lang="zh-CN">
 <head>
     <meta charset="UTF-8">
-    <meta name="viewport" content="width=device-width, initial-scale=1.0, user-scalable=yes">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
     <title>HS编码智能查询系统</title>
     <style>
-        * {
-            box-sizing: border-box;
-            margin: 0;
-            padding: 0;
+        :root {
+            --primary: #2563eb;
+            --primary-dark: #1d4ed8;
+            --bg: #f8fafc;
+            --card: #ffffff;
+            --text: #1e293b;
+            --text-light: #64748b;
+            --border: #e2e8f0;
+            --shadow: 0 1px 3px rgba(0,0,0,0.06), 0 1px 2px rgba(0,0,0,0.04);
+            --shadow-md: 0 4px 6px rgba(0,0,0,0.05), 0 2px 4px rgba(0,0,0,0.03);
+            --radius: 12px;
         }
-
+        * { margin: 0; padding: 0; box-sizing: border-box; }
         body {
-            font-family: 'Segoe UI', Tahoma, Geneva, Verdana, sans-serif;
-            background: #f0f2f5;
-            padding: 20px;
-            color: #1e2a3a;
+            font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, "Helvetica Neue", Arial, sans-serif;
+            background: var(--bg);
+            color: var(--text);
+            line-height: 1.6;
+            min-height: 100vh;
         }
-
-        .container {
-            max-width: 1400px;
-            margin: 0 auto;
-        }
-
-        .card {
-            background: white;
-            border-radius: 20px;
-            box-shadow: 0 8px 20px rgba(0,0,0,0.05);
-            padding: 24px 28px;
-            margin-bottom: 30px;
-            transition: all 0.2s ease;
-        }
-
-        .card h2 {
-            font-size: 1.6rem;
-            margin-bottom: 20px;
-            border-left: 5px solid #2c7da0;
-            padding-left: 16px;
-            color: #0b3b49;
-        }
-
-        .form-grid {
-            display: grid;
-            grid-template-columns: repeat(auto-fit, minmax(280px, 1fr));
-            gap: 24px;
-            margin-bottom: 20px;
-        }
-
-        .form-group {
-            display: flex;
-            flex-direction: column;
-            gap: 8px;
-        }
-
-        .form-group label {
-            font-weight: 600;
-            color: #2c3e50;
-            font-size: 0.9rem;
-        }
-
-        .form-group label .required {
-            color: #e63946;
-            margin-left: 4px;
-        }
-
-        input, textarea, select {
-            padding: 12px 14px;
-            border: 1px solid #cbd5e1;
-            border-radius: 12px;
-            font-size: 0.95rem;
-            transition: 0.2s;
-            font-family: inherit;
-            background: #fff;
-        }
-
-        input:focus, textarea:focus {
-            outline: none;
-            border-color: #2c7da0;
-            box-shadow: 0 0 0 3px rgba(44,125,160,0.2);
-        }
-
-        textarea {
-            resize: vertical;
-            min-height: 80px;
-        }
-
-        .btn {
-            background: #2c7da0;
+        .header {
+            background: linear-gradient(135deg, #1e40af 0%, #3b82f6 100%);
             color: white;
-            border: none;
-            padding: 12px 24px;
-            border-radius: 40px;
-            font-weight: 600;
-            cursor: pointer;
-            transition: 0.2s;
-            font-size: 1rem;
-            display: inline-flex;
-            align-items: center;
-            gap: 8px;
-            justify-content: center;
-        }
-
-        .btn:hover {
-            background: #1f5e7a;
-            transform: translateY(-1px);
-        }
-
-        .btn-secondary {
-            background: #475569;
-        }
-        .btn-secondary:hover {
-            background: #334155;
-        }
-
-        .btn-outline {
-            background: transparent;
-            border: 1px solid #2c7da0;
-            color: #2c7da0;
-        }
-        .btn-outline:hover {
-            background: #e6f4f9;
-        }
-
-        .upload-area {
-            border: 2px dashed #cbd5e1;
-            border-radius: 20px;
-            padding: 20px;
+            padding: 1.5rem 1rem;
             text-align: center;
-            background: #fafcff;
-            cursor: pointer;
-            transition: 0.2s;
-        }
-        .upload-area:hover {
-            border-color: #2c7da0;
-            background: #f0f9ff;
-        }
-        .image-preview {
-            margin-top: 15px;
-            max-width: 100%;
-            display: flex;
-            justify-content: center;
-        }
-        .image-preview img {
-            max-width: 100%;
-            max-height: 160px;
-            border-radius: 12px;
             box-shadow: 0 2px 8px rgba(0,0,0,0.1);
         }
-
-        .results-grid {
+        .header h1 { font-size: 1.6rem; font-weight: 700; }
+        .header p { opacity: 0.85; margin-top: 0.25rem; font-size: 0.9rem; }
+        .container { max-width: 800px; margin: 0 auto; padding: 1.5rem 1rem 3rem; }
+        .card {
+            background: var(--card);
+            border-radius: var(--radius);
+            padding: 1.5rem;
+            margin-bottom: 1.25rem;
+            box-shadow: var(--shadow);
+            border: 1px solid var(--border);
+        }
+        .card-title {
+            font-size: 1.1rem;
+            font-weight: 600;
+            margin-bottom: 1rem;
             display: flex;
-            flex-direction: column;
-            gap: 20px;
-            margin-top: 20px;
+            align-items: center;
+            gap: 0.5rem;
         }
+        .card-title .icon { font-size: 1.3rem; }
+        .form-group { margin-bottom: 1rem; }
+        .form-group label {
+            display: block;
+            font-weight: 500;
+            margin-bottom: 0.4rem;
+            font-size: 0.9rem;
+            color: var(--text);
+        }
+        .form-group label .required { color: #ef4444; }
+        .form-group input, .form-group textarea, .form-group select {
+            width: 100%;
+            padding: 0.65rem 0.75rem;
+            border: 1px solid var(--border);
+            border-radius: 8px;
+            font-size: 0.95rem;
+            transition: border-color 0.15s, box-shadow 0.15s;
+            background: #fafbfc;
+        }
+        .form-group input:focus, .form-group textarea:focus, .form-group select:focus {
+            outline: none;
+            border-color: var(--primary);
+            box-shadow: 0 0 0 3px rgba(37,99,235,0.1);
+        }
+        .form-group textarea { resize: vertical; min-height: 70px; }
+        .btn {
+            display: inline-flex;
+            align-items: center;
+            justify-content: center;
+            gap: 0.4rem;
+            padding: 0.7rem 1.5rem;
+            border-radius: 8px;
+            font-size: 0.95rem;
+            font-weight: 600;
+            cursor: pointer;
+            border: none;
+            transition: all 0.15s;
+        }
+        .btn-primary {
+            background: var(--primary);
+            color: white;
+            width: 100%;
+        }
+        .btn-primary:hover { background: var(--primary-dark); }
+        .btn-primary:disabled { opacity: 0.6; cursor: not-allowed; }
 
-        .result-item {
-            background: #f8fafc;
-            border-radius: 20px;
-            padding: 20px;
-            border-left: 6px solid #2c7da0;
-            transition: 0.1s;
+        /* 图片上传区域 */
+        .upload-zone {
+            border: 2px dashed var(--border);
+            border-radius: 12px;
+            padding: 2rem 1rem;
+            text-align: center;
+            cursor: pointer;
+            transition: border-color 0.15s, background 0.15s;
+            background: #fafbfc;
+            position: relative;
         }
-        .result-item h3 {
-            font-size: 1.3rem;
-            margin-bottom: 8px;
-            color: #0f172a;
+        .upload-zone:hover, .upload-zone.drag-over {
+            border-color: var(--primary);
+            background: #eff6ff;
         }
-        .hs-code {
-            font-family: monospace;
-            font-size: 1.2rem;
-            font-weight: bold;
-            background: #e2e8f0;
-            display: inline-block;
-            padding: 4px 12px;
-            border-radius: 30px;
-            margin-bottom: 12px;
+        .upload-zone.has-image {
+            border-style: solid;
+            border-color: #86efac;
+            background: #f0fdf4;
         }
-        .tax-info {
+        .upload-zone .upload-icon { font-size: 2rem; margin-bottom: 0.5rem; transition: transform 0.2s; }
+        .upload-zone.has-image .upload-icon { transform: scale(1.1); }
+        .upload-zone p { font-size: 0.85rem; color: var(--text-light); }
+        .upload-zone .image-overlay {
+            display: none;
+            position: absolute;
+            top: 0; left: 0; right: 0; bottom: 0;
+            background: rgba(255,255,255,0.6);
+            border-radius: 12px;
+            justify-content: center;
+            align-items: center;
+        }
+        .upload-zone.analyzing .image-overlay {
+            display: flex;
+        }
+        .analyze-spinner {
+            width: 28px;
+            height: 28px;
+            border: 3px solid var(--border);
+            border-top-color: var(--primary);
+            border-radius: 50%;
+            animation: spin 0.8s linear infinite;
+        }
+        @keyframes spin { to { transform: rotate(360deg); } }
+
+        /* AI 分析结果标签 */
+        .ai-tags {
             display: flex;
             flex-wrap: wrap;
-            gap: 16px;
-            margin: 12px 0;
-            font-size: 0.9rem;
+            gap: 0.4rem;
+            margin-top: 0.75rem;
         }
-        .badge {
-            background: #e2e8f0;
-            border-radius: 40px;
-            padding: 4px 12px;
-            font-size: 0.8rem;
+        .ai-tag {
+            display: inline-flex;
+            align-items: center;
+            gap: 0.25rem;
+            font-size: 0.78rem;
+            padding: 0.25rem 0.6rem;
+            border-radius: 20px;
             font-weight: 500;
         }
-        .match-reason {
-            font-size: 0.85rem;
-            color: #2d6a4f;
-            margin-top: 10px;
-            padding-top: 8px;
-            border-top: 1px solid #cbd5e1;
+        .ai-tag.object {
+            background: #dbeafe;
+            color: #1e40af;
+        }
+        .ai-tag.material {
+            background: #fef3c7;
+            color: #92400e;
+        }
+        .ai-tag.confidence {
+            background: #f0f0f0;
+            color: #525252;
+            font-size: 0.7rem;
+        }
+
+        /* 结果卡片 */
+        .result-card {
+            border-left: 3px solid var(--primary);
+            padding: 1rem;
+            margin-bottom: 0.75rem;
+            background: #f8fafc;
+            border-radius: 0 8px 8px 0;
+        }
+        .result-card .code {
+            font-size: 1.2rem;
+            font-weight: 700;
+            color: var(--primary);
+        }
+        .result-card .name { font-weight: 600; margin: 0.25rem 0; }
+        .result-card .meta {
+            display: flex;
+            flex-wrap: wrap;
+            gap: 0.5rem;
+            margin-top: 0.4rem;
+            font-size: 0.8rem;
+        }
+        .result-card .meta span {
+            background: #e2e8f0;
+            padding: 0.2rem 0.5rem;
+            border-radius: 4px;
+            white-space: nowrap;
+        }
+        .match-reasons {
+            font-size: 0.8rem;
+            color: var(--text-light);
+            margin-top: 0.3rem;
+        }
+        .score-badge {
+            float: right;
+            background: var(--primary);
+            color: white;
+            padding: 0.15rem 0.5rem;
+            border-radius: 20px;
+            font-size: 0.75rem;
+            font-weight: 600;
         }
         .loading {
             text-align: center;
-            padding: 30px;
-            font-style: italic;
-            color: #5e6f8d;
+            padding: 1.5rem;
+            display: none;
         }
-        .alert {
-            padding: 12px 18px;
-            border-radius: 14px;
-            margin-bottom: 20px;
+        .spinner {
+            width: 36px;
+            height: 36px;
+            border: 3px solid var(--border);
+            border-top-color: var(--primary);
+            border-radius: 50%;
+            animation: spin 0.8s linear infinite;
+            margin: 0 auto 0.5rem;
         }
-        .alert-error {
-            background: #ffe6e5;
-            border-left: 4px solid #e63946;
-            color: #b91c1c;
-        }
-        .alert-success {
-            background: #e0f2e9;
-            border-left: 4px solid #2e7d64;
-            color: #14532d;
-        }
-        .alert-warning {
-            background: #fff3e0;
-            border-left: 4px solid #f59e0b;
-            color: #92400e;
-        }
-        .flex-between {
-            display: flex;
-            justify-content: space-between;
-            align-items: center;
-            flex-wrap: wrap;
-            gap: 12px;
-        }
-        hr {
-            margin: 16px 0;
-            border: none;
-            height: 1px;
-            background: #e2e8f0;
-        }
-        footer {
-            text-align: center;
-            margin-top: 30px;
-            font-size: 0.8rem;
-            color: #5e6f8d;
-        }
-        @media (max-width: 680px) {
-            .card {
-                padding: 18px;
-            }
-            .btn {
-                width: 100%;
-            }
-        }
-        code {
-            background: #f1f5f9;
-            padding: 2px 6px;
+
+        .toast {
+            position: fixed;
+            top: 1rem;
+            right: 1rem;
+            padding: 0.75rem 1.25rem;
             border-radius: 8px;
-            font-family: monospace;
-            font-size: 0.85rem;
+            color: white;
+            font-weight: 500;
+            z-index: 1000;
+            display: none;
+            animation: slideIn 0.3s;
+        }
+        @keyframes slideIn { from { transform: translateX(100%); } to { transform: translateX(0); } }
+        .toast.success { background: #16a34a; }
+        .toast.error { background: #dc2626; }
+        .toast.info { background: #2563eb; }
+
+        .features {
+            display: grid;
+            grid-template-columns: 1fr 1fr;
+            gap: 0.5rem;
+            margin-top: 0.5rem;
+        }
+        .feature-tag {
+            background: #eff6ff;
+            color: var(--primary);
+            padding: 0.3rem 0.6rem;
+            border-radius: 6px;
+            font-size: 0.78rem;
+            text-align: center;
+        }
+
+        /* 提示文字 */
+        .hint {
+            font-size: 0.78rem;
+            color: #94a3b8;
+            margin-top: 0.25rem;
+        }
+
+        @media (max-width: 600px) {
+            .header h1 { font-size: 1.3rem; }
+            .container { padding: 1rem 0.75rem 2rem; }
+            .card { padding: 1rem; }
+            .features { grid-template-columns: 1fr; }
         }
     </style>
 </head>
 <body>
-<div class="container">
-    <div style="margin-bottom: 20px;">
-        <h1 style="color: #0b3b49;">📦 HS编码智能归类系统</h1>
-        <p style="color: #334155;">基于商品描述、材质及图片的HS编码推荐 / 支持Excel批量导入最新税则</p>
+    <div class="header">
+        <h1>🔍 HS编码智能查询系统</h1>
+        <p>输入货物描述、材质和尺寸，或上传图片辅助识别，快速匹配海关HS编码</p>
     </div>
 
-    <!-- 查询卡片 -->
-    <div class="card">
-        <h2>🔍 查询HS编码</h2>
-        <div class="form-grid">
-            <div class="form-group">
-                <label>货物描述 <span class="required">*</span></label>
-                <textarea id="description" placeholder="例如：儿童学习写字桌，可升降，带书架" rows="2"></textarea>
-            </div>
-            <div class="form-group">
-                <label>主要材质 <span class="required">*</span></label>
-                <input type="text" id="material" placeholder="例如：实木、塑料、金属、人造板" value="木质">
-            </div>
-            <div class="form-group">
-                <label>尺寸（选填）</label>
-                <input type="text" id="dimensions" placeholder="例如：120cm x 60cm x 75cm">
-            </div>
-            <div class="form-group">
-                <label>商品照片（辅助识别，选填）</label>
-                <div class="upload-area" id="uploadArea">
-                    📸 点击或拖拽上传图片 (jpg/png)
-                    <input type="file" id="imageInput" accept="image/jpeg,image/png,image/jpg,image/gif" style="display: none;">
+    <div class="container">
+        <!-- ========== 图片上传（增强版） ========== -->
+        <div class="card">
+            <div class="card-title"><span class="icon">🖼️</span> 商品图片（可选 · 智能分析）</div>
+            <div class="upload-zone" id="uploadZone">
+                <div class="upload-icon" id="uploadIcon">📷</div>
+                <p id="uploadText">点击或拖拽上传商品图片</p>
+                <p class="hint" id="uploadHint">支持 JPG/PNG/GIF，AI 会自动提取商品特征并回填下方表单</p>
+                <div class="image-overlay">
+                    <div class="analyze-spinner"></div>
                 </div>
-                <div class="image-preview" id="imagePreview"></div>
-                <input type="hidden" id="uploadedImageName" value="">
             </div>
+            <input type="file" id="imageInput" accept="image/*" style="display:none">
+            <!-- AI 分析结果 -->
+            <div class="ai-tags" id="aiTags" style="display:none;"></div>
+            <div id="imageStatus" style="font-size:0.8rem;margin-top:0.5rem;"></div>
         </div>
-        <div class="flex-between">
-            <button class="btn" id="searchBtn">✨ 开始查询</button>
-            <button class="btn btn-outline" id="clearBtn">清空表单</button>
+
+        <!-- ========== 查询表单 ========== -->
+        <div class="card">
+            <div class="card-title"><span class="icon">📦</span> 货物信息</div>
+            <div class="form-group">
+                <label><span class="required">*</span> 货物描述</label>
+                <input type="text" id="description" placeholder="例如：儿童学习写字桌，可升降，带书架" maxlength="200">
+                <p class="hint">上传图片后此处会自动填充 AI 识别的物品名称</p>
+            </div>
+            <div class="form-group">
+                <label><span class="required">*</span> 主要材质</label>
+                <input type="text" id="material" placeholder="例如：实木、塑料+金属" maxlength="100">
+                <p class="hint">上传图片后此处会自动填充 AI 推测的材质</p>
+            </div>
+            <div class="form-group">
+                <label>尺寸规格（可选）</label>
+                <input type="text" id="dimensions" placeholder="例如：120x60x75cm" maxlength="100">
+            </div>
+            <button class="btn btn-primary" id="searchBtn" onclick="searchHS()">
+                🔎 开始查询
+            </button>
         </div>
-        <div id="queryStatus"></div>
+
+        <!-- ========== 加载动画 ========== -->
+        <div class="loading" id="loading">
+            <div class="spinner"></div>
+            <p>正在匹配HS编码...</p>
+        </div>
+
+        <!-- ========== 查询结果 ========== -->
+        <div id="results"></div>
     </div>
 
-    <!-- 查询结果展示 -->
-    <div class="card" id="resultCard" style="display: none;">
-        <h2>📋 推荐HS编码</h2>
-        <div id="resultsContainer" class="results-grid"></div>
-    </div>
+    <!-- ========== Toast 消息 ========== -->
+    <div class="toast" id="toast"></div>
 
-    <!-- Excel导入卡片 -->
-    <div class="card">
-        <h2>📂 批量导入HS编码表 (Excel)</h2>
-        <p style="margin-bottom: 16px; color: #334155;">支持 .xlsx / .xls / .csv 格式，将自动更新数据库中的HS编码数据。</p>
-        <div class="flex-between">
-            <label class="btn btn-secondary" style="cursor: pointer; display: inline-block;">
-                📎 选择Excel文件
-                <input type="file" id="excelFileInput" accept=".xlsx, .xls, .csv" style="display: none;">
-            </label>
-            <button class="btn" id="importExcelBtn">⬆️ 上传并导入数据库</button>
-        </div>
-        <div id="importStatus" style="margin-top: 20px;"></div>
-    </div>
-    <footer>基于2026年海关税则数据 | 匹配算法持续优化，仅供关务参考</footer>
-</div>
+    <script>
+        // ============ 全局状态 ============
+        let currentImageFile = null;      // 当前上传的图片文件
+        let imageAnalysisResult = null;   // AI 分析结果缓存
 
-<script>
-    // DOM 元素
-    const descriptionEl = document.getElementById('description');
-    const materialEl = document.getElementById('material');
-    const dimensionsEl = document.getElementById('dimensions');
-    const imageInput = document.getElementById('imageInput');
-    const uploadArea = document.getElementById('uploadArea');
-    const imagePreview = document.getElementById('imagePreview');
-    const uploadedImageName = document.getElementById('uploadedImageName');
-    const searchBtn = document.getElementById('searchBtn');
-    const clearBtn = document.getElementById('clearBtn');
-    const resultCard = document.getElementById('resultCard');
-    const resultsContainer = document.getElementById('resultsContainer');
-    const queryStatus = document.getElementById('queryStatus');
-    const excelFileInput = document.getElementById('excelFileInput');
-    const importExcelBtn = document.getElementById('importExcelBtn');
-    const importStatus = document.getElementById('importStatus');
+        // ============ DOM 元素 ============
+        const uploadZone = document.getElementById('uploadZone');
+        const imageInput = document.getElementById('imageInput');
+        const uploadIcon = document.getElementById('uploadIcon');
+        const uploadText = document.getElementById('uploadText');
+        const uploadHint = document.getElementById('uploadHint');
+        const aiTagsDiv = document.getElementById('aiTags');
+        const imageStatusDiv = document.getElementById('imageStatus');
+        const descInput = document.getElementById('description');
+        const materialInput = document.getElementById('material');
 
-    let currentImageFile = null;
+        // ============ 图片上传事件 ============
+        uploadZone.addEventListener('click', () => imageInput.click());
 
-    // 图片上传区域事件
-    uploadArea.addEventListener('click', () => imageInput.click());
-    uploadArea.addEventListener('dragover', (e) => {
-        e.preventDefault();
-        uploadArea.style.borderColor = '#2c7da0';
-    });
-    uploadArea.addEventListener('dragleave', () => {
-        uploadArea.style.borderColor = '#cbd5e1';
-    });
-    uploadArea.addEventListener('drop', (e) => {
-        e.preventDefault();
-        uploadArea.style.borderColor = '#cbd5e1';
-        const files = e.dataTransfer.files;
-        if (files.length > 0 && files[0].type.startsWith('image/')) {
-            imageInput.files = files;
-            handleImageUpload(files[0]);
-        } else {
-            showTemporaryMessage(queryStatus, '请拖放图片文件', 'error');
+        uploadZone.addEventListener('dragover', (e) => {
+            e.preventDefault();
+            uploadZone.classList.add('drag-over');
+        });
+        uploadZone.addEventListener('dragleave', () => {
+            uploadZone.classList.remove('drag-over');
+        });
+        uploadZone.addEventListener('drop', (e) => {
+            e.preventDefault();
+            uploadZone.classList.remove('drag-over');
+            const files = e.dataTransfer.files;
+            if (files.length > 0) handleImageFile(files[0]);
+        });
+        imageInput.addEventListener('change', (e) => {
+            if (e.target.files.length > 0) handleImageFile(e.target.files[0]);
+        });
+
+        function handleImageFile(file) {
+            if (!file.type.startsWith('image/')) {
+                showToast('请上传图片文件（JPG/PNG/GIF）', 'error');
+                return;
+            }
+            // 限制文件大小 10MB
+            if (file.size > 10 * 1024 * 1024) {
+                showToast('图片大小不能超过 10MB', 'error');
+                return;
+            }
+
+            currentImageFile = file;
+            imageAnalysisResult = null;
+
+            // 更新 UI：显示缩略图（通过 FileReader）
+            const reader = new FileReader();
+            reader.onload = (e) => {
+                uploadIcon.textContent = '🖼️';
+                uploadText.textContent = file.name;
+                uploadHint.textContent = `文件大小: ${(file.size / 1024).toFixed(1)} KB · 点击重新选择`;
+                uploadZone.classList.add('has-image');
+                aiTagsDiv.style.display = 'none';
+                imageStatusDiv.textContent = '';
+            };
+            reader.readAsDataURL(file);
+
+            // 触发 AI 分析
+            analyzeImage(file);
         }
-    });
 
-    imageInput.addEventListener('change', (e) => {
-        if (e.target.files.length > 0) {
-            handleImageUpload(e.target.files[0]);
+        // ============ AI 图像分析 ============
+        async function analyzeImage(file) {
+            uploadZone.classList.add('analyzing');
+            imageStatusDiv.innerHTML = '⏳ AI 正在识别商品特征...';
+            aiTagsDiv.style.display = 'none';
+
+            const formData = new FormData();
+            formData.append('image', file);
+
+            try {
+                const res = await fetch('/api/analyze_image', {
+                    method: 'POST',
+                    body: formData
+                });
+                const data = await res.json();
+
+                if (data.success && data.analysis) {
+                    imageAnalysisResult = data.analysis;
+                    renderAITags(data.analysis);
+                    autoFillForm(data.analysis);
+                    imageStatusDiv.innerHTML = '✅ 识别完成，下方表单已自动填充';
+                    showToast('AI 识别完成，已自动填充货物信息', 'success');
+                } else {
+                    imageStatusDiv.innerHTML = '⚠️ ' + (data.error || 'AI 分析暂不可用，请手动填写');
+                    showToast('AI 分析失败，请手动填写货物信息', 'info');
+                }
+            } catch (err) {
+                console.error('AI analysis error:', err);
+                imageStatusDiv.innerHTML = '⚠️ AI 服务暂时不可用，请手动填写';
+                showToast('AI 服务连接失败，请手动填写', 'info');
+            } finally {
+                uploadZone.classList.remove('analyzing');
+            }
         }
-    });
 
-    async function handleImageUpload(file) {
-        if (!file) return;
-        const formData = new FormData();
-        formData.append('image', file);
+        function renderAITags(analysis) {
+            let html = '';
+            // 识别到的物品
+            if (analysis.objects && analysis.objects.length > 0) {
+                analysis.objects.forEach(obj => {
+                    html += `<span class="ai-tag object">📦 ${obj.name || obj}</span>`;
+                    if (obj.confidence) {
+                        html += `<span class="ai-tag confidence">${Math.round(obj.confidence * 100)}%</span>`;
+                    }
+                });
+            }
+            // 识别到的材质
+            if (analysis.materials && analysis.materials.length > 0) {
+                analysis.materials.forEach(mat => {
+                    html += `<span class="ai-tag material">🧱 ${mat.name || mat}</span>`;
+                    if (mat.confidence) {
+                        html += `<span class="ai-tag confidence">${Math.round(mat.confidence * 100)}%</span>`;
+                    }
+                });
+            }
+            // 原始描述
+            if (analysis.raw_description) {
+                html += `<span class="ai-tag" style="background:#f0fdf4;color:#166534;">💬 ${analysis.raw_description}</span>`;
+            }
 
-        try {
-            const response = await fetch('/api/upload', {
-                method: 'POST',
-                body: formData
-            });
-            const data = await response.json();
-            if (data.success) {
-                currentImageFile = file;
-                uploadedImageName.value = data.filename || '';
-                const reader = new FileReader();
-                reader.onload = (e) => {
-                    imagePreview.innerHTML = `<img src="${e.target.result}" alt="预览图">`;
+            if (html) {
+                aiTagsDiv.innerHTML = html;
+                aiTagsDiv.style.display = 'flex';
+            }
+        }
+
+        function autoFillForm(analysis) {
+            // 自动填充货物描述
+            let descParts = [];
+            if (analysis.raw_description) {
+                descParts.push(analysis.raw_description);
+            } else if (analysis.objects && analysis.objects.length > 0) {
+                const objNames = analysis.objects.map(o => o.name || o);
+                descParts.push(objNames.join('、'));
+            }
+            if (descParts.length > 0 && !descInput.value.trim()) {
+                descInput.value = descParts.join('，');
+                // 触发 input 事件，让用户感知到自动填充
+                descInput.dispatchEvent(new Event('input', { bubbles: true }));
+            }
+
+            // 自动填充材质
+            let matParts = [];
+            if (analysis.materials && analysis.materials.length > 0) {
+                const matNames = analysis.materials.map(m => m.name || m);
+                matParts.push(matNames.join('+'));
+            }
+            if (matParts.length > 0 && !materialInput.value.trim()) {
+                materialInput.value = matParts.join('+');
+                materialInput.dispatchEvent(new Event('input', { bubbles: true }));
+            }
+        }
+
+        // ============ HS编码查询 ============
+        async function searchHS() {
+            const desc = descInput.value.trim();
+            const material = materialInput.value.trim();
+            const dimensions = document.getElementById('dimensions').value.trim();
+
+            if (!desc || !material) {
+                showToast('请填写货物描述和主要材质（可上传图片自动填充）', 'error');
+                return;
+            }
+
+            const btn = document.getElementById('searchBtn');
+            btn.disabled = true;
+            btn.textContent = '查询中...';
+            document.getElementById('loading').style.display = 'block';
+            document.getElementById('results').innerHTML = '';
+
+            try {
+                // 如果有图片分析结果，一并发送给后端
+                const body = {
+                    description: desc,
+                    material: material,
+                    dimensions: dimensions
                 };
-                reader.readAsDataURL(file);
-                showTemporaryMessage(queryStatus, '图片上传成功', 'success');
-            } else {
-                showTemporaryMessage(queryStatus, '图片上传失败: ' + (data.error || '未知错误'), 'error');
-                clearImagePreview();
+                if (imageAnalysisResult) {
+                    body.image_analysis = imageAnalysisResult;
+                }
+
+                const res = await fetch('/api/search', {
+                    method: 'POST',
+                    headers: { 'Content-Type': 'application/json' },
+                    body: JSON.stringify(body)
+                });
+                const data = await res.json();
+                if (data.success) {
+                    renderResults(data.results, data.features);
+                } else {
+                    showToast(data.error || '查询失败', 'error');
+                    document.getElementById('results').innerHTML =
+                        '<p style="text-align:center;color:#94a3b8;padding:2rem;">未找到匹配结果，请尝试调整描述</p>';
+                }
+            } catch (err) {
+                showToast('网络错误，请重试', 'error');
+            } finally {
+                btn.disabled = false;
+                btn.textContent = '🔎 开始查询';
+                document.getElementById('loading').style.display = 'none';
             }
-        } catch (err) {
-            console.error(err);
-            showTemporaryMessage(queryStatus, '图片上传网络错误', 'error');
-            clearImagePreview();
-        }
-    }
-
-    function clearImagePreview() {
-        imagePreview.innerHTML = '';
-        uploadedImageName.value = '';
-        currentImageFile = null;
-        imageInput.value = '';
-    }
-
-    function showTemporaryMessage(container, text, type = 'info') {
-        const alertDiv = document.createElement('div');
-        alertDiv.className = `alert alert-${type === 'error' ? 'error' : type === 'warning' ? 'warning' : 'success'}`;
-        alertDiv.innerText = text;
-        container.appendChild(alertDiv);
-        setTimeout(() => {
-            if (container.contains(alertDiv)) container.removeChild(alertDiv);
-        }, 4000);
-    }
-
-    clearBtn.addEventListener('click', () => {
-        descriptionEl.value = '';
-        materialEl.value = '';
-        dimensionsEl.value = '';
-        clearImagePreview();
-        resultCard.style.display = 'none';
-        queryStatus.innerHTML = '';
-    });
-
-    // 查询HS编码
-    searchBtn.addEventListener('click', async () => {
-        const description = descriptionEl.value.trim();
-        const material = materialEl.value.trim();
-        const dimensions = dimensionsEl.value.trim();
-
-        if (!description) {
-            showTemporaryMessage(queryStatus, '请填写货物描述', 'error');
-            return;
-        }
-        if (!material) {
-            showTemporaryMessage(queryStatus, '请填写主要材质', 'error');
-            return;
         }
 
-        resultCard.style.display = 'block';
-        resultsContainer.innerHTML = '<div class="loading">🔎 智能匹配中，请稍候...</div>';
-
-        const requestBody = {
-            description: description,
-            material: material,
-            dimensions: dimensions
-        };
-
-        try {
-            const response = await fetch('/api/search', {
-                method: 'POST',
-                headers: { 'Content-Type': 'application/json' },
-                body: JSON.stringify(requestBody)
-            });
-            const data = await response.json();
-            if (data.success && data.results && data.results.length > 0) {
-                renderResults(data.results);
-            } else {
-                resultsContainer.innerHTML = '<div class="alert alert-error">未找到匹配的HS编码，请尝试更具体的描述或材质。</div>';
+        function renderResults(results, features) {
+            if (!results || results.length === 0) {
+                document.getElementById('results').innerHTML =
+                    '<div class="card"><p style="text-align:center;color:#94a3b8;padding:1.5rem;">未找到匹配的HS编码，请尝试调整描述或材质</p></div>';
+                return;
             }
-        } catch (err) {
-            console.error(err);
-            resultsContainer.innerHTML = '<div class="alert alert-error">请求失败，请检查网络或后端服务。</div>';
-        }
-    });
 
-    function renderResults(results) {
-        if (!results.length) {
-            resultsContainer.innerHTML = '<div class="alert">暂无推荐结果</div>';
-            return;
-        }
-        let html = '';
-        results.forEach((item) => {
-            html += `
-                <div class="result-item">
-                    <div class="flex-between">
-                        <h3>${escapeHtml(item.name || '商品')}</h3>
-                        <span class="hs-code">${escapeHtml(item.hs_code)}</span>
+            let html = '<div class="card"><div class="card-title"><span class="icon">📋</span> 查询结果</div>';
+
+            // 特征标签
+            if (features) {
+                html += '<div class="features">';
+                if (features.keywords) {
+                    features.keywords.forEach(k => { html += `<span class="feature-tag">🔑 ${k}</span>`; });
+                }
+                if (features.detected_material) {
+                    html += `<span class="feature-tag">🧱 ${features.detected_material}</span>`;
+                }
+                html += '</div>';
+            }
+
+            results.forEach((r, i) => {
+                html += `
+                <div class="result-card">
+                    <span class="score-badge">推荐 ${i + 1}</span>
+                    <div class="code">${escapeHtml(r.hs_code || '')}</div>
+                    <div class="name">${escapeHtml(r.name || '')}</div>
+                    ${r.description ? `<div style="font-size:0.85rem;color:var(--text-light);margin-top:0.2rem;">${escapeHtml(r.description)}</div>` : ''}
+                    <div class="meta">
+                        ${r.import_tax_rate ? `<span>📥 最惠国进口税率: ${escapeHtml(r.import_tax_rate)}</span>` : ''}
+                        ${r.general_import_tax_rate ? `<span>📥 普通进口税率: ${escapeHtml(r.general_import_tax_rate)}</span>` : ''}
+                        ${r.temporary_import_tax_rate ? `<span>📥 暂定进口税率: ${escapeHtml(r.temporary_import_tax_rate)}</span>` : ''}
+                        ${r.vat_rate ? `<span>💰 增值税: ${escapeHtml(r.vat_rate)}</span>` : ''}
+                        ${r.export_rebate_rate ? `<span>📤 出口退税: ${escapeHtml(r.export_rebate_rate)}</span>` : ''}
+                        ${r.consumption_tax_rate ? `<span>🛒 消费税: ${escapeHtml(r.consumption_tax_rate)}</span>` : ''}
                     </div>
-                    <div class="tax-info">
-                        <span class="badge">📈 进口关税: ${item.import_tax_rate || '—'}</span>
-                        <span class="badge">🧾 增值税: ${item.vat_rate || '—'}</span>
-                        <span class="badge">💰 出口退税: ${item.export_rebate_rate || '—'}</span>
-                        <span class="badge">⚙️ 监管条件: ${item.supervision_conditions || '无'}</span>
-                    </div>
-                    <div>${escapeHtml(item.description || '暂无详细描述')}</div>
-                    ${item.supervision_description ? `<div><small>📌 监管说明：${escapeHtml(item.supervision_description)}</small></div>` : ''}
-                    ${item.brief ? `<div class="match-reason">📢 ${escapeHtml(item.brief)}</div>` : ''}
-                    ${item.match_reasons && item.match_reasons.length ? `<div class="match-reason">🎯 匹配依据：${item.match_reasons.join('；')}</div>` : ''}
-                </div>
-            `;
-        });
-        resultsContainer.innerHTML = html;
-    }
-
-    function escapeHtml(str) {
-        if (!str) return '';
-        return str.replace(/[&<>]/g, function(m) {
-            if (m === '&') return '&amp;';
-            if (m === '<') return '&lt;';
-            if (m === '>') return '&gt;';
-            return m;
-        }).replace(/[\uD800-\uDBFF][\uDC00-\uDFFF]/g, function(c) {
-            return c;
-        });
-    }
-
-    // Excel导入逻辑（支持 403 错误处理）
-    importExcelBtn.addEventListener('click', async () => {
-        const file = excelFileInput.files[0];
-        if (!file) {
-            showTemporaryMessage(importStatus, '请先选择一个Excel文件', 'error');
-            return;
-        }
-        if (file.size > 5 * 1024 * 1024) {
-            showTemporaryMessage(importStatus, '文件大小不能超过5MB', 'error');
-            return;
-        }
-        const allowedExt = /\.(xlsx|xls|csv)$/i;
-        if (!allowedExt.test(file.name)) {
-            showTemporaryMessage(importStatus, '请上传 .xlsx, .xls 或 .csv 格式文件', 'error');
-            return;
-        }
-
-        const formData = new FormData();
-        formData.append('file', file);
-
-        importStatus.innerHTML = '<div class="loading">⏳ 正在处理并导入数据库，请勿关闭页面...</div>';
-        try {
-            const resp = await fetch('/api/import_excel', {
-                method: 'POST',
-                body: formData
+                    ${r.supervision_conditions ? `<div class="meta"><span>🛃 监管条件: ${escapeHtml(r.supervision_conditions)} - ${escapeHtml(r.supervision_description || '')}</span></div>` : ''}
+                    ${r.unit_1 || r.unit_2 ? `<div class="meta"><span>📏 单位: ${escapeHtml(r.unit_1 || '')}${r.unit_2 ? ' / ' + escapeHtml(r.unit_2) : ''}</span></div>` : ''}
+                    ${r.match_reasons ? `<div class="match-reasons">✅ ${r.match_reasons.map(escapeHtml).join('；')}</div>` : ''}
+                    ${r.brief ? `<div style="font-size:0.8rem;color:var(--text-light);margin-top:0.3rem">💡 ${escapeHtml(r.brief)}</div>` : ''}
+                </div>`;
             });
-            const result = await resp.json();
-            if (resp.status === 403 || (result.error && result.error.includes('导入功能已禁用'))) {
-                importStatus.innerHTML = `
-                    <div class="alert alert-warning">
-                        ❌ 导入功能已禁用。<br>
-                        如需更新数据，请使用命令行工具：<br>
-                        <code>python admin_import.py 文件.xlsx</code>
-                    </div>`;
-            } else if (result.success) {
-                importStatus.innerHTML = `<div class="alert alert-success">✅ ${result.message || '导入成功'}</div>`;
-                excelFileInput.value = ''; // 清空选择
-            } else {
-                importStatus.innerHTML = `<div class="alert alert-error">❌ 导入失败: ${result.error || '未知错误'}</div>`;
-            }
-        } catch (err) {
-            console.error(err);
-            importStatus.innerHTML = `<div class="alert alert-error">❌ 网络错误或服务异常</div>`;
+            html += '</div>';
+            document.getElementById('results').innerHTML = html;
         }
-    });
 
-    // 点击label触发文件选择
-    document.querySelector('label[for="excelFileInput"]')?.addEventListener('click', () => {
-        excelFileInput.click();
-    });
-    excelFileInput.addEventListener('change', (e) => {
-        if (e.target.files.length) {
-            showTemporaryMessage(importStatus, `已选择: ${e.target.files[0].name}`, 'success');
+        // ============ 工具函数 ============
+        function escapeHtml(str) {
+            if (!str) return '';
+            const div = document.createElement('div');
+            div.textContent = str;
+            return div.innerHTML;
         }
-    });
-</script>
+
+        function showToast(msg, type) {
+            const toast = document.getElementById('toast');
+            toast.textContent = msg;
+            toast.className = `toast ${type}`;
+            toast.style.display = 'block';
+            clearTimeout(toast._timeout);
+            toast._timeout = setTimeout(() => { toast.style.display = 'none'; }, 3500);
+        }
+
+        // ============ 键盘快捷键 ============
+        document.addEventListener('keydown', (e) => {
+            if (e.key === 'Enter' && e.ctrlKey) {
+                e.preventDefault();
+                searchHS();
+            }
+        });
+    </script>
 </body>
 </html>
