@@ -25,7 +25,7 @@ ALLOWED_EXTENSIONS = {'png', 'jpg', 'jpeg', 'gif', 'webp'}
 MAX_CONTENT_LENGTH = 16 * 1024 * 1024  # 16MB
 
 # DeepSeek API 配置
-DEEPSEEK_API_KEY = "你的API_KEY"  # ← 请替换为你的真实 Key
+DEEPSEEK_API_KEY = os.environ.get("DEEPSEEK_API_KEY", "")
 DEEPSEEK_API_URL = "https://api.deepseek.com/chat/completions"
 DEEPSEEK_MODEL = "deepseek-chat"  # 支持视觉的模型
 
