@@ -6,7 +6,6 @@ import re
 
 DB_PATH = 'hs_data.db'
 
-# 列名映射（添加了更多变体）
 COLUMN_MAP = {
     '商品编码': 'hs_code', 'hs编码': 'hs_code', 'code': 'hs_code',
     '商品名称': 'name', '货品名称': 'name',
@@ -68,57 +67,55 @@ def import_excel(file_path):
         print(f"📄 读取到 {len(df)} 行数据")
         print(f"📋 原始列名: {list(df.columns)}")
 
-        # 1. 构建安全的列重命名字典（严格去重，避免目标重复）
+        # 1. 构建重命名字典（严格去重）
         rename_dict = {}
         used_targets = set()
         for src_col, target_col in COLUMN_MAP.items():
             if src_col in df.columns and target_col not in used_targets:
                 rename_dict[src_col] = target_col
                 used_targets.add(target_col)
+        print(f"🔄 实际映射列: {list(rename_dict.keys())}")
 
-        print(f"🔄 实际映射列: {list(rename_dict.keys())} -> {list(rename_dict.values())}")
-
-        # 2. 执行重命名
+        # 2. 重命名
         df.rename(columns=rename_dict, inplace=True)
 
-        # 3. 删除可能意外产生的重复列（仅保留第一列）
+        # 3. 删除任何重复列（保留第一次出现）
         df = df.loc[:, ~df.columns.duplicated(keep='first')]
 
-        # 4. 确保关键字段存在
-        required = ['hs_code', 'name']
-        for f in required:
-            if f not in df.columns:
-                print(f"❌ 缺少关键列: {f}")
-                return False
+        # 4. 确保关键字段
+        if 'hs_code' not in df.columns or 'name' not in df.columns:
+            print("❌ 缺少关键列 hs_code 或 name")
+            return False
 
-        # 5. 数据清洗
-        df = df.dropna(subset=['hs_code', 'name'])
+        # 5. 清洗基础数据
         df['hs_code'] = df['hs_code'].str.strip().str.replace(r'\s+', '', regex=True)
         df['name'] = df['name'].str.strip()
 
-        # 6. 补全缺失的字段
-        possible_fields = [
+        # 6. 补全缺失字段（统一填充空字符串）
+        needed_fields = [
             'description', 'import_tax_rate', 'general_import_tax_rate',
             'temporary_import_tax_rate', 'consumption_tax_rate', 'export_tax_rate',
             'vat_rate', 'export_rebate_rate', 'supervision_conditions',
             'unit_1', 'unit_2', 'category', 'subcategory', 'inspection_category'
         ]
-        for f in possible_fields:
+        for f in needed_fields:
             if f not in df.columns:
                 df[f] = ''
 
-        # 7. 生成监管描述和关键词
+        # 7. 生成监管描述和关键词（现在都是标量，安全）
         df['supervision_description'] = df['supervision_conditions'].apply(get_supervision_description)
         df['keywords'] = df.apply(
-            lambda row: extract_keywords(str(row['name']), str(row.get('description', '')), ''), axis=1
+            lambda row: extract_keywords(str(row['name']), str(row['description']), ''), axis=1
         )
 
-        # 8. 连接数据库并导入
+        # 8. 转换为字典列表，彻底消除 Series 歧义
+        records = df.to_dict(orient='records')
+
+        # 9. 连接数据库
         conn = sqlite3.connect(DB_PATH)
         cursor = conn.cursor()
-
         cursor.execute("PRAGMA table_info(hs_codes)")
-        existing_cols = [info[1] for info in cursor.fetchall()]
+        existing_cols = [col[1] for col in cursor.fetchall()]
         print(f"🗄️ 数据库字段: {existing_cols}")
 
         cursor.execute("DELETE FROM hs_codes")
@@ -131,35 +128,34 @@ def import_excel(file_path):
             'consumption_tax_rate', 'export_tax_rate', 'vat_rate', 'export_rebate_rate',
             'keywords', 'material_constraint', 'parent_code', 'unit_1', 'unit_2', 'inspection_category'
         ]
-        # 只取数据库和DataFrame都存在的字段
-        avail = [f for f in insert_fields if f in existing_cols and f in df.columns]
+        avail = [f for f in insert_fields if f in existing_cols]
         if not avail:
-            print("❌ 无可插入的字段")
+            print("❌ 没有可插入的字段")
             conn.close()
             return False
 
-        sql = f"INSERT INTO hs_codes ({','.join(avail)}) VALUES ({','.join(['?']*len(avail))})"
+        placeholders = ', '.join(['?' for _ in avail])
+        sql = f"INSERT INTO hs_codes ({', '.join(avail)}) VALUES ({placeholders})"
 
         inserted = 0
         skipped = 0
-        for idx, row in df.iterrows():
+        for idx, row in enumerate(records, start=1):
             values = []
             for f in avail:
-                val = row[f]
-                # 安全处理：如果是 Series，取第一个值
-                if isinstance(val, pd.Series):
-                    val = val.iloc[0] if len(val) > 0 else ''
-                if pd.isna(val) or str(val).strip() == '':
-                    values.append('')
+                # 直接从字典取值，并转为字符串，安全处理 NaN
+                val = row.get(f, '')
+                if pd.isna(val) if isinstance(val, float) else False:
+                    val = ''
                 else:
-                    values.append(str(val).strip())
+                    val = str(val).strip()
+                values.append(val)
             try:
                 cursor.execute(sql, values)
                 inserted += 1
             except Exception as e:
                 skipped += 1
                 if skipped <= 5:
-                    print(f"   ⚠️ 跳过行 {idx+2}: {str(e)[:100]}")
+                    print(f"   ⚠️ 跳过第 {idx} 行: {str(e)[:100]}")
 
         conn.commit()
         conn.close()
