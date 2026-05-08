@@ -25,7 +25,7 @@ MAX_CONTENT_LENGTH = 16 * 1024 * 1024  # 16 MB
 
 # DeepSeek API 配置（从环境变量读取）
 DEEPSEEK_API_KEY = os.environ.get('DEEPSEEK_API_KEY', '')
-DEEPSEEK_API_URL = 'https://api.deepseek.com/chat/completions'
+DEEPSEEK_API_URL = 'https://api.deepseek.com/v1/chat/completions'
 DEEPSEEK_MODEL = 'deepseek-chat'  # 该模型支持视觉
 
 os.makedirs(UPLOAD_FOLDER, exist_ok=True)
