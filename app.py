@@ -12,6 +12,9 @@ from flask import Flask, render_template, request, jsonify
 from flask_cors import CORS
 from PIL import Image
 
+# 阿里云百炼依赖
+from openai import OpenAI
+
 app = Flask(__name__)
 CORS(app)
 
@@ -23,10 +26,10 @@ UPLOAD_FOLDER = 'uploads'
 ALLOWED_EXTENSIONS = {'png', 'jpg', 'jpeg', 'gif', 'webp'}
 MAX_CONTENT_LENGTH = 16 * 1024 * 1024  # 16 MB
 
-# DeepSeek API 配置（从环境变量读取）
-DEEPSEEK_API_KEY = os.environ.get('DEEPSEEK_API_KEY', '')
-DEEPSEEK_API_URL = 'https://api.deepseek.com/v1/chat/completions'
-DEEPSEEK_MODEL = 'deepseek-chat'  # 该模型支持视觉
+# 阿里云百炼 API 配置（从环境变量读取）
+BAILIAN_API_KEY = os.environ.get('BAILIAN_API_KEY', '')
+BAILIAN_BASE_URL = 'https://dashscope.aliyuncs.com/compatible-mode/v1'
+BAILIAN_MODEL = 'qwen-vl-max-latest'  # 推荐视觉模型，也可用 qwen-vl-plus-latest
 
 os.makedirs(UPLOAD_FOLDER, exist_ok=True)
 app.config['UPLOAD_FOLDER'] = UPLOAD_FOLDER
@@ -44,18 +47,13 @@ def allowed_file(filename):
     return '.' in filename and filename.rsplit('.', 1)[1].lower() in ALLOWED_EXTENSIONS
 
 # ============================================================
-# 关键词提取与评分
+# 关键词提取与评分（保留给 /api/search 使用）
 # ============================================================
 def extract_keywords_from_text(text):
     if not text:
         return []
     parts = re.split(r'[，。；：、；\s/|,;:]+', text)
-    keywords = []
-    for p in parts:
-        p = p.strip()
-        if 1 <= len(p) <= 15:
-            keywords.append(p)
-    return keywords
+    return [p.strip() for p in parts if 1 <= len(p.strip()) <= 15]
 
 def extract_material_keywords(material_text):
     if not material_text:
@@ -92,24 +90,20 @@ def calculate_match_score(query_desc, query_material, row):
     material_keywords, detected_material = extract_material_keywords(query_material)
     all_query_words = set(query_keywords + material_keywords)
     
-    # 1. 商品名称匹配 (40分)
-    name_lower = name.lower()
+    # 1. 商品名称匹配
     for word in query_keywords:
-        if word.lower() in name_lower:
+        if word.lower() in name.lower():
             score += 8
             reasons.append(f'商品名称包含「{word}」')
     
-    # 2. 关键词匹配 (35分)
+    # 2. 关键词匹配
     db_kw_list = [k.strip().lower() for k in db_keywords.split() if k.strip()]
-    for word in all_query_words:
-        if word.lower() in db_kw_list:
-            score += 5
-    if db_kw_list:
-        matched_kw = [k for k in all_query_words if k.lower() in db_kw_list]
-        if matched_kw:
-            reasons.append(f'关键词匹配: {", ".join(matched_kw[:3])}')
+    matched_kw = [k for k in all_query_words if k.lower() in db_kw_list]
+    if matched_kw:
+        score += len(matched_kw) * 5
+        reasons.append(f'关键词匹配: {", ".join(matched_kw[:3])}')
     
-    # 3. 材质匹配 (25分)
+    # 3. 材质匹配
     for word in material_keywords:
         if word in material_constraint or word in description or word in name:
             score += 8
@@ -122,92 +116,18 @@ def calculate_match_score(query_desc, query_material, row):
     return min(score, 100), reasons[:5]
 
 # ============================================================
-# DeepSeek 图片分析
-# ============================================================
-def analyze_image_with_deepseek(image_path):
-    """调用 DeepSeek Vision 模型分析商品图片"""
-    if not DEEPSEEK_API_KEY:
-        raise ValueError('DEEPSEEK_API_KEY 未配置')
-    
-    with open(image_path, 'rb') as f:
-        image_data = base64.b64encode(f.read()).decode('utf-8')
-    
-    ext = image_path.rsplit('.', 1)[-1].lower()
-    mime_map = {
-        'jpg': 'image/jpeg', 'jpeg': 'image/jpeg',
-        'png': 'image/png', 'gif': 'image/gif', 'webp': 'image/webp'
-    }
-    mime_type = mime_map.get(ext, 'image/jpeg')
-    
-    headers = {
-        'Authorization': f'Bearer {DEEPSEEK_API_KEY}',
-        'Content-Type': 'application/json'
-    }
-    payload = {
-        'model': DEEPSEEK_MODEL,
-        'messages': [
-            {
-                'role': 'system',
-                'content': (
-                    '你是一个专业的海关商品归类助手。请分析用户上传的商品图片，提取以下信息，'
-                    '并严格按照 JSON 格式返回，不要包含任何其他文字：\n\n'
-                    '{\n'
-                    '  "objects": [{"name": "物品名称", "confidence": 0.0~1.0}],\n'
-                    '  "materials": [{"name": "材质名称", "confidence": 0.0~1.0}],\n'
-                    '  "raw_description": "一段简短的中文描述，包含物品、材质、主要特征"\n'
-                    '}\n\n'
-                    '要求：\n'
-                    '1. objects 列出识别到的商品物品（1-3个），confidence 表示确信度\n'
-                    '2. materials 列出推测的材质（1-3种），使用中文\n'
-                    '3. raw_description 是一句完整的中文描述，适合用于HS编码搜索\n'
-                    '4. 只返回 JSON，不要带 ```json 标记或任何解释'
-                )
-            },
-            {
-                'role': 'user',
-                'content': [
-                    {'type': 'text', 'text': '请分析这张商品图片，提取物品、材质和描述'},
-                    {
-                        'type': 'image_url',
-                        'image_url': {'url': f'data:{mime_type};base64,{image_data}'}
-                    }
-                ]
-            }
-        ],
-        'max_tokens': 500,
-        'temperature': 0.3
-    }
-    
-    response = requests.post(DEEPSEEK_API_URL, headers=headers, json=payload, timeout=30)
-    response.raise_for_status()
-    
-    result = response.json()
-    content = result['choices'][0]['message']['content'].strip()
-    
-    # 清洗可能的 Markdown 标记
-    content = re.sub(r'^```json\s*', '', content)
-    content = re.sub(r'\s*```$', '', content)
-    
-    analysis = json.loads(content)
-    analysis.setdefault('objects', [])
-    analysis.setdefault('materials', [])
-    analysis.setdefault('raw_description', '')
-    return analysis
-
-# ============================================================
 # 路由
 # ============================================================
 @app.route('/')
 def index():
     return render_template('index.html')
 
-# 原有的 HS 编码查询接口（保留，但你的前端已改用本地查询）
+# HS 编码查询（保留，但你的前端已改用本地数据查询）
 @app.route('/api/search', methods=['POST'])
 def search():
     data = request.get_json() or {}
     description = data.get('description', '').strip()
     material = data.get('material', '').strip()
-    dimensions = data.get('dimensions', '').strip()
     
     if not description or not material:
         return jsonify({'success': False, 'error': '请提供货物描述和材质'}), 400
@@ -245,19 +165,15 @@ def search():
             })
     
     scored_results.sort(key=lambda x: x['score'], reverse=True)
-    top_results = scored_results[:3]
     conn.close()
     
     return jsonify({
         'success': True,
-        'results': top_results,
-        'features': {
-            'keywords': keywords,
-            'detected_material': detected_material,
-        }
+        'results': scored_results[:3],
+        'features': {'keywords': keywords, 'detected_material': detected_material}
     })
 
-# 原有的图片上传接口（保留，但你的前端不再使用）
+# 原有的文件上传接口（保留，但前端主要用 base64）
 @app.route('/api/upload', methods=['POST'])
 def upload_image():
     if 'image' not in request.files:
@@ -285,40 +201,85 @@ def upload_image():
         'info': {'width': width, 'height': height, 'format': img_format}
     })
 
-# 新增：接收 base64 图片的 AI 分析接口
+# 新增：阿里云百炼视觉分析接口（接收 base64 图片）
 @app.route('/api/analyze_image', methods=['POST'])
 def analyze_image():
-    """接收 JSON 格式的 base64 图片，调用 DeepSeek 分析"""
+    """调用阿里云百炼视觉模型分析商品图片"""
     try:
         data = request.get_json()
         if not data or 'image_base64' not in data or 'mime_type' not in data:
             return jsonify({'success': False, 'error': '请求体必须包含 image_base64 和 mime_type'}), 400
         
-        image_bytes = base64.b64decode(data['image_base64'])
-        ext = data['mime_type'].split('/')[-1]  # 如 'png', 'jpeg'
-        filename = f"temp_{uuid.uuid4().hex}.{ext}"
-        filepath = os.path.join(app.config['UPLOAD_FOLDER'], filename)
+        image_base64 = data['image_base64']
+        mime_type = data['mime_type']  # 例如 image/jpeg, image/png
         
-        with open(filepath, 'wb') as f:
-            f.write(image_bytes)
+        # 检查 API Key
+        if not BAILIAN_API_KEY:
+            return jsonify({'success': False, 'error': '阿里云百炼 API Key 未配置'}), 500
         
-        try:
-            analysis = analyze_image_with_deepseek(filepath)
-            return jsonify({'success': True, 'analysis': analysis, 'filename': filename})
-        except ValueError as e:
-            return jsonify({'success': False, 'error': str(e)}), 500
-        except requests.exceptions.RequestException as e:
-            return jsonify({'success': False, 'error': f'DeepSeek API 调用失败: {str(e)}'}), 500
-        except json.JSONDecodeError:
-            return jsonify({'success': False, 'error': 'AI 返回格式解析失败，请重试'}), 500
-        except Exception as e:
-            return jsonify({'success': False, 'error': f'Internal server error: {str(e)}'}), 500
-        finally:
-            if os.path.exists(filepath):
-                os.remove(filepath)
+        # 初始化 OpenAI 客户端（指向阿里云百炼兼容端点）
+        client = OpenAI(
+            api_key=BAILIAN_API_KEY,
+            base_url=BAILIAN_BASE_URL,
+        )
+        
+        # 构造消息：图片使用 data:image/...;base64,... 格式嵌入
+        messages = [
+            {
+                "role": "system",
+                "content": (
+                    "你是一个专业的海关商品归类助手。请分析用户上传的商品图片，提取以下信息，"
+                    "并严格按照 JSON 格式返回，不要包含任何其他文字：\n\n"
+                    "{\n"
+                    '  "objects": [{"name": "物品名称", "confidence": 0.95}],\n'
+                    '  "materials": [{"name": "材质", "confidence": 0.9}],\n'
+                    '  "raw_description": "一段简短的中文描述，包含物品、材质、主要特征"\n'
+                    "}\n"
+                    "要求：objects 1-3个，materials 1-3种，只用中文。只返回 JSON。"
+                )
+            },
+            {
+                "role": "user",
+                "content": [
+                    {
+                        "type": "image_url",
+                        "image_url": {
+                            "url": f"data:{mime_type};base64,{image_base64}"
+                        }
+                    },
+                    {
+                        "type": "text",
+                        "text": "请分析这张商品图片，提取物品、材质和描述"
+                    }
+                ]
+            }
+        ]
+        
+        # 调用大模型
+        completion = client.chat.completions.create(
+            model=BAILIAN_MODEL,
+            messages=messages,
+            temperature=0.3,
+            max_tokens=500
+        )
+        
+        content = completion.choices[0].message.content.strip()
+        # 清洗可能出现的 markdown 代码块标记
+        content = re.sub(r'^```json\s*', '', content)
+        content = re.sub(r'\s*```$', '', content)
+        
+        analysis = json.loads(content)
+        # 确保必要字段存在
+        analysis.setdefault('objects', [])
+        analysis.setdefault('materials', [])
+        analysis.setdefault('raw_description', '')
+        
+        return jsonify({'success': True, 'analysis': analysis})
     
+    except json.JSONDecodeError:
+        return jsonify({'success': False, 'error': 'AI 返回格式解析失败，请重试'}), 500
     except Exception as e:
-        return jsonify({'success': False, 'error': f'Invalid request: {str(e)}'}), 400
+        return jsonify({'success': False, 'error': f'阿里云百炼 API 调用失败: {str(e)}'}), 500
 
 # 禁用 Excel 导入接口
 @app.route('/api/import_excel', methods=['POST'])
@@ -329,12 +290,12 @@ def import_excel():
     }), 403
 
 # ============================================================
-# 启动（仅用于本地开发，Railway 使用 gunicorn）
+# 启动（本地开发用，Railway 使用 gunicorn）
 # ============================================================
 if __name__ == '__main__':
     print("=" * 50)
     print("HS编码智能查询系统启动中...")
-    print(f"DeepSeek API: {'已配置' if DEEPSEEK_API_KEY else '❌ 未配置'}")
+    print(f"阿里云百炼 API: {'已配置' if BAILIAN_API_KEY else '❌ 未配置'}")
     print("默认地址: http://127.0.0.1:5000")
     print("=" * 50)
     app.run(debug=True, host='0.0.0.0', port=5000)
