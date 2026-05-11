@@ -9,7 +9,7 @@ from typing import Optional, List, Dict, Any
 
 import redis.asyncio as redis
 import httpx
-from fastapi import FastAPI, HTTPException, Request
+from fastapi import FastAPI, HTTPException
 from fastapi.middleware.cors import CORSMiddleware
 from pydantic import BaseModel
 from pybreaker import CircuitBreaker, CircuitBreakerError
@@ -55,23 +55,31 @@ class SearchResultItem(BaseModel):
     match_score: float
     match_reason: str
 
-# ------------------ 生命周期管理 ------------------
+# ------------------ 生命周期管理（Redis 连不上时自动降级） ------------------
 @asynccontextmanager
 async def lifespan(app: FastAPI):
-    # 启动时初始化 Redis 连接
-    app.state.redis = await redis.from_url(REDIS_URL, decode_responses=True)
-    # 初始化 HTTP 客户端（连接池）
+    # 尝试连接 Redis，失败时设置为 None
+    try:
+        app.state.redis = await redis.from_url(REDIS_URL, decode_responses=True)
+        await app.state.redis.ping()  # 验证连接是否真的可用
+        logger.info("✅ Redis 连接成功，缓存已启用")
+    except Exception as e:
+        logger.warning(f"⚠️ Redis 连接失败，将禁用缓存: {e}")
+        app.state.redis = None
+
+    # 初始化 HTTP 客户端（用于图片分析）
     app.state.http_client = httpx.AsyncClient(timeout=30.0)
-    logger.info("✅ Redis & HTTP client 已启动")
+    logger.info("✅ HTTP client 已启动")
     yield
     # 关闭时清理
-    await app.state.redis.close()
+    if app.state.redis:
+        await app.state.redis.close()
     await app.state.http_client.aclose()
     logger.info("🛑 资源已关闭")
 
 app = FastAPI(lifespan=lifespan)
 
-# CORS 允许前端任意域名（可改为你的前端地址）
+# ------------------ CORS 配置 ------------------
 app.add_middleware(
     CORSMiddleware,
     allow_origins=["https://www.umtsh.com"],
@@ -80,7 +88,7 @@ app.add_middleware(
     allow_headers=["*"],
 )
 
-# ------------------ 数据库查询（核心：去掉实时爬虫） ------------------
+# ------------------ 数据库查询（去除实时爬虫） ------------------
 def get_db_connection():
     """返回 SQLite 连接，并启用 row_factory 返回字典"""
     conn = sqlite3.connect(DATABASE_PATH)
@@ -90,8 +98,9 @@ def get_db_connection():
 def search_in_database(description: str, material: str) -> List[Dict[str, Any]]:
     """
     从本地 hs_codes 表中进行关键词匹配检索。
-    注意：这里使用了简单的 LIKE 匹配，生产环境建议使用全文搜索或向量检索。
+    注意：使用了简单的 LIKE 匹配，生产环境建议使用全文搜索或向量检索。
     """
+    # 提取关键词（至少 2 个字符）
     keywords = set()
     for word in (description + " " + material).split():
         if len(word) >= 2:
@@ -102,7 +111,7 @@ def search_in_database(description: str, material: str) -> List[Dict[str, Any]]:
     conn = get_db_connection()
     cursor = conn.cursor()
 
-    # 动态构建 WHERE 子句（避免 SQL 注入：使用参数化查询）
+    # 动态构建 WHERE 子句（参数化查询防注入）
     conditions = []
     params = []
     for kw in keywords:
@@ -127,7 +136,7 @@ def search_in_database(description: str, material: str) -> List[Dict[str, Any]]:
     results = []
     for row in rows:
         record = dict(row)
-        text_for_score = (record.get("name","") + " " + record.get("description","")).lower()
+        text_for_score = (record.get("name", "") + " " + record.get("description", "")).lower()
         score = 0
         matched = []
         for kw in keywords:
@@ -142,19 +151,33 @@ def search_in_database(description: str, material: str) -> List[Dict[str, Any]]:
     results.sort(key=lambda x: x["match_score"], reverse=True)
     return results[:10]
 
-# ------------------ 缓存装饰器 ------------------
+# ------------------ 缓存装饰器（Redis 不可用时直接查询） ------------------
 async def cached_search(description: str, material: str) -> Optional[List[Dict]]:
-    cache_key = f"hs_search:{description}:{material}"
     redis_client = app.state.redis
-    cached = await redis_client.get(cache_key)
-    if cached:
-        logger.info(f"缓存命中: {cache_key}")
-        return json.loads(cached)
+
+    # 如果 Redis 可用，尝试读取缓存
+    if redis_client is not None:
+        cache_key = f"hs_search:{description}:{material}"
+        try:
+            cached = await redis_client.get(cache_key)
+            if cached:
+                logger.info(f"缓存命中: {cache_key}")
+                return json.loads(cached)
+        except Exception as e:
+            logger.warning(f"Redis 读取失败，跳过缓存: {e}")
+
     # 查数据库（同步方法需在线程池中执行）
     loop = asyncio.get_event_loop()
     results = await loop.run_in_executor(None, search_in_database, description, material)
-    if results:
-        await redis_client.setex(cache_key, CACHE_TTL, json.dumps(results, ensure_ascii=False))
+
+    # 如果 Redis 可用，写入缓存
+    if results and redis_client is not None:
+        try:
+            cache_key = f"hs_search:{description}:{material}"
+            await redis_client.setex(cache_key, CACHE_TTL, json.dumps(results, ensure_ascii=False))
+        except Exception as e:
+            logger.warning(f"Redis 写入失败: {e}")
+
     return results
 
 # ------------------ API 接口 ------------------
@@ -169,7 +192,6 @@ async def search(request: SearchRequest):
     if not results:
         return {"status": "success", "results": []}
 
-    # 转换为 Pydantic 模型格式
     return {
         "status": "success",
         "results": [
@@ -197,7 +219,6 @@ async def analyze_image(request: ImageAnalysisRequest):
     if not BAILIAN_API_KEY:
         raise HTTPException(status_code=500, detail="BAILIAN_API_KEY 未配置")
 
-    # 构造阿里云百炼请求
     url = "https://dashscope.aliyuncs.com/api/v1/services/aigc/multimodal-generation/generation"
     headers = {
         "Authorization": f"Bearer {BAILIAN_API_KEY}",
@@ -220,15 +241,12 @@ async def analyze_image(request: ImageAnalysisRequest):
     }
 
     try:
-        # 使用熔断器保护的异步请求
         response = await circuit_breaker.call(
             app.state.http_client.post, url, headers=headers, json=data
         )
         response.raise_for_status()
         result = response.json()
-        # 解析百炼返回的文本（假设模型按约定返回 JSON）
         output_text = result["output"]["choices"][0]["message"]["content"][0]["text"]
-        # 尝试提取 JSON
         import re
         json_match = re.search(r'\{.*\}', output_text, re.DOTALL)
         if json_match:
