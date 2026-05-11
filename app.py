@@ -1,301 +1,253 @@
-# -*- coding: utf-8 -*-
-import os
-import re
-import sqlite3
-import uuid
-import base64
+import asyncio
 import json
-import requests
-from datetime import datetime
+import logging
+import os
+import sqlite3
+import time
+from contextlib import asynccontextmanager
+from typing import Optional, List, Dict, Any
 
-from flask import Flask, render_template, request, jsonify
-from flask_cors import CORS
-from PIL import Image
+import redis.asyncio as redis
+import httpx
+from fastapi import FastAPI, HTTPException, Request
+from fastapi.middleware.cors import CORSMiddleware
+from pydantic import BaseModel
+from pybreaker import CircuitBreaker, CircuitBreakerError
 
-# 阿里云百炼依赖
-from openai import OpenAI
+# ------------------ 日志配置 ------------------
+logging.basicConfig(level=logging.INFO)
+logger = logging.getLogger("hs-api")
 
-app = Flask(__name__)
-CORS(app)
+# ------------------ 配置 ------------------
+DATABASE_PATH = os.getenv("DATABASE_PATH", "hs_data.db")
+REDIS_URL = os.getenv("REDIS_URL", "redis://localhost:6379")
+BAILIAN_API_KEY = os.getenv("BAILIAN_API_KEY")  # 阿里云百炼 Key
+BAILIAN_MODEL = "qwen-vl-plus"                 # 视觉模型
+CACHE_TTL = 86400  # 24小时
 
-# ============================================================
-# 配置
-# ============================================================
-DB_PATH = 'hs_data.db'
-UPLOAD_FOLDER = 'uploads'
-ALLOWED_EXTENSIONS = {'png', 'jpg', 'jpeg', 'gif', 'webp'}
-MAX_CONTENT_LENGTH = 16 * 1024 * 1024  # 16 MB
+# ------------------ 熔断器 ------------------
+# 用于阿里云百炼 API 调用
+circuit_breaker = CircuitBreaker(
+    fail_max=5,
+    reset_timeout=60,
+    name="bailian"
+)
 
-# 阿里云百炼 API 配置（从环境变量读取）
-BAILIAN_API_KEY = os.environ.get('BAILIAN_API_KEY', '')
-BAILIAN_BASE_URL = 'https://dashscope.aliyuncs.com/compatible-mode/v1'
-BAILIAN_MODEL = 'qwen-vl-max-latest'  # 推荐视觉模型，也可用 qwen-vl-plus-latest
+# ------------------ 数据模型 ------------------
+class SearchRequest(BaseModel):
+    description: str
+    material: str
 
-os.makedirs(UPLOAD_FOLDER, exist_ok=True)
-app.config['UPLOAD_FOLDER'] = UPLOAD_FOLDER
-app.config['MAX_CONTENT_LENGTH'] = MAX_CONTENT_LENGTH
+class ImageAnalysisRequest(BaseModel):
+    image_base64: str
+    mime_type: str
 
-# ============================================================
-# 数据库工具
-# ============================================================
-def get_db():
-    conn = sqlite3.connect(DB_PATH)
+class SearchResultItem(BaseModel):
+    hs_code: str
+    name: str
+    description: Optional[str] = None
+    import_tax_rate: Optional[str] = None
+    general_import_tax_rate: Optional[str] = None
+    vat_rate: Optional[str] = None
+    export_rebate_rate: Optional[str] = None
+    supervision_conditions: Optional[str] = None
+    supervision_description: Optional[str] = None
+    match_score: float
+    match_reason: str
+
+# ------------------ 生命周期管理 ------------------
+@asynccontextmanager
+async def lifespan(app: FastAPI):
+    # 启动时初始化 Redis 连接
+    app.state.redis = await redis.from_url(REDIS_URL, decode_responses=True)
+    # 初始化 HTTP 客户端（连接池）
+    app.state.http_client = httpx.AsyncClient(timeout=30.0)
+    logger.info("✅ Redis & HTTP client 已启动")
+    yield
+    # 关闭时清理
+    await app.state.redis.close()
+    await app.state.http_client.aclose()
+    logger.info("🛑 资源已关闭")
+
+app = FastAPI(lifespan=lifespan)
+
+# CORS 允许前端任意域名（可改为你的前端地址）
+app.add_middleware(
+    CORSMiddleware,
+    allow_origins=["*"],
+    allow_credentials=True,
+    allow_methods=["*"],
+    allow_headers=["*"],
+)
+
+# ------------------ 数据库查询（核心：去掉实时爬虫） ------------------
+def get_db_connection():
+    """返回 SQLite 连接，并启用 row_factory 返回字典"""
+    conn = sqlite3.connect(DATABASE_PATH)
     conn.row_factory = sqlite3.Row
     return conn
 
-def allowed_file(filename):
-    return '.' in filename and filename.rsplit('.', 1)[1].lower() in ALLOWED_EXTENSIONS
-
-# ============================================================
-# 关键词提取与评分（保留给 /api/search 使用）
-# ============================================================
-def extract_keywords_from_text(text):
-    if not text:
+def search_in_database(description: str, material: str) -> List[Dict[str, Any]]:
+    """
+    从本地 hs_codes 表中进行关键词匹配检索。
+    注意：这里使用了简单的 LIKE 匹配，生产环境建议使用全文搜索或向量检索。
+    """
+    keywords = set()
+    for word in (description + " " + material).split():
+        if len(word) >= 2:
+            keywords.add(word)
+    if not keywords:
         return []
-    parts = re.split(r'[，。；：、；\s/|,;:]+', text)
-    return [p.strip() for p in parts if 1 <= len(p.strip()) <= 15]
 
-def extract_material_keywords(material_text):
-    if not material_text:
-        return [], '未知'
-    material_text = material_text.strip()
-    material_map = {
-        '木': '木质', '实木': '木质', '板材': '木质', '竹': '竹制', '藤': '藤制',
-        '钢': '钢制', '铁': '铁制', '铝': '铝制', '铜': '铜制', '金属': '金属',
-        '不锈钢': '不锈钢', '合金': '合金',
-        '塑料': '塑料', '树脂': '塑料', '亚克力': '塑料', 'pp': '塑料', 'pe': '塑料', 'pvc': '塑料',
-        '玻璃': '玻璃', '陶瓷': '陶瓷', '石材': '石材', '大理石': '石材',
-        '橡胶': '橡胶', '硅胶': '橡胶',
-        '皮革': '皮革', '真皮': '皮革', 'pu皮': '皮革',
-        '纺织': '纺织', '棉': '纺织', '麻': '纺织', '丝': '纺织', '化纤': '纺织', '涤纶': '纺织', '尼龙': '纺织',
-        '纸': '纸质', '纸板': '纸质',
-    }
-    detected = '未知'
-    for key, val in material_map.items():
-        if key in material_text:
-            detected = val
-            break
-    return extract_keywords_from_text(material_text), detected
-
-def calculate_match_score(query_desc, query_material, row):
-    score = 0
-    reasons = []
-    
-    name = row['name'] or ''
-    description = row['description'] or ''
-    db_keywords = row['keywords'] or ''
-    material_constraint = row['material_constraint'] or ''
-    
-    query_keywords = extract_keywords_from_text(query_desc)
-    material_keywords, detected_material = extract_material_keywords(query_material)
-    all_query_words = set(query_keywords + material_keywords)
-    
-    # 1. 商品名称匹配
-    for word in query_keywords:
-        if word.lower() in name.lower():
-            score += 8
-            reasons.append(f'商品名称包含「{word}」')
-    
-    # 2. 关键词匹配
-    db_kw_list = [k.strip().lower() for k in db_keywords.split() if k.strip()]
-    matched_kw = [k for k in all_query_words if k.lower() in db_kw_list]
-    if matched_kw:
-        score += len(matched_kw) * 5
-        reasons.append(f'关键词匹配: {", ".join(matched_kw[:3])}')
-    
-    # 3. 材质匹配
-    for word in material_keywords:
-        if word in material_constraint or word in description or word in name:
-            score += 8
-            reasons.append(f'材质「{word}」符合')
-    if detected_material != '未知':
-        if detected_material in material_constraint or detected_material in description:
-            score += 10
-            reasons.append(f'材质类型「{detected_material}」匹配')
-    
-    return min(score, 100), reasons[:5]
-
-# ============================================================
-# 路由
-# ============================================================
-@app.route('/')
-def index():
-    return render_template('index.html')
-
-# HS 编码查询（保留，但你的前端已改用本地数据查询）
-@app.route('/api/search', methods=['POST'])
-def search():
-    data = request.get_json() or {}
-    description = data.get('description', '').strip()
-    material = data.get('material', '').strip()
-    
-    if not description or not material:
-        return jsonify({'success': False, 'error': '请提供货物描述和材质'}), 400
-    
-    keywords = extract_keywords_from_text(description)
-    material_keywords, detected_material = extract_material_keywords(material)
-    
-    conn = get_db()
+    conn = get_db_connection()
     cursor = conn.cursor()
-    cursor.execute("SELECT * FROM hs_codes")
+
+    # 动态构建 WHERE 子句（避免 SQL 注入：使用参数化查询）
+    conditions = []
+    params = []
+    for kw in keywords:
+        conditions.append("(name LIKE ? OR description LIKE ? OR keywords LIKE ?)")
+        like_kw = f"%{kw}%"
+        params.extend([like_kw, like_kw, like_kw])
+
+    sql = f"""
+        SELECT hs_code, name, description,
+               import_tax_rate, general_import_tax_rate,
+               vat_rate, export_rebate_rate,
+               supervision_conditions, supervision_description
+        FROM hs_codes
+        WHERE {' OR '.join(conditions)}
+        LIMIT 50
+    """
+    cursor.execute(sql, params)
     rows = cursor.fetchall()
-    
-    scored_results = []
-    for row in rows:
-        score, reasons = calculate_match_score(description, material, row)
-        if score > 0:
-            scored_results.append({
-                'hs_code': row['hs_code'],
-                'name': row['name'],
-                'description': row['description'],
-                'import_tax_rate': row['import_tax_rate'] or '',
-                'general_import_tax_rate': row['general_import_tax_rate'] or '',
-                'temporary_import_tax_rate': row['temporary_import_tax_rate'] or '',
-                'consumption_tax_rate': row['consumption_tax_rate'] or '',
-                'export_tax_rate': row['export_tax_rate'] or '',
-                'vat_rate': row['vat_rate'] or '',
-                'export_rebate_rate': row['export_rebate_rate'] or '',
-                'supervision_conditions': row['supervision_conditions'] or '',
-                'supervision_description': row['supervision_description'] or '',
-                'unit_1': row['unit_1'] or '',
-                'unit_2': row['unit_2'] or '',
-                'match_reasons': reasons,
-                'brief': (row['description'] or '')[:120],
-                'score': score
-            })
-    
-    scored_results.sort(key=lambda x: x['score'], reverse=True)
     conn.close()
-    
-    return jsonify({
-        'success': True,
-        'results': scored_results[:3],
-        'features': {'keywords': keywords, 'detected_material': detected_material}
-    })
 
-# 原有的文件上传接口（保留，但前端主要用 base64）
-@app.route('/api/upload', methods=['POST'])
-def upload_image():
-    if 'image' not in request.files:
-        return jsonify({'success': False, 'error': '未找到图片文件'}), 400
-    
-    file = request.files['image']
-    if file.filename == '' or not allowed_file(file.filename):
-        return jsonify({'success': False, 'error': '不支持的文件格式'}), 400
-    
-    ext = file.filename.rsplit('.', 1)[1].lower()
-    filename = f"{uuid.uuid4().hex}.{ext}"
-    filepath = os.path.join(app.config['UPLOAD_FOLDER'], filename)
-    file.save(filepath)
-    
-    try:
-        img = Image.open(filepath)
-        width, height = img.size
-        img_format = img.format
-    except Exception:
-        width, height, img_format = 0, 0, 'Unknown'
-    
-    return jsonify({
-        'success': True,
-        'filename': filename,
-        'info': {'width': width, 'height': height, 'format': img_format}
-    })
+    # 计算简单匹配得分（用于排序）
+    results = []
+    for row in rows:
+        record = dict(row)
+        text_for_score = (record.get("name","") + " " + record.get("description","")).lower()
+        score = 0
+        matched = []
+        for kw in keywords:
+            if kw.lower() in text_for_score:
+                score += 20
+                matched.append(kw)
+        if score > 0:
+            record["match_score"] = min(score, 100)
+            record["match_reason"] = f"匹配关键词: {', '.join(matched[:3])}"
+            results.append(record)
 
-# 新增：阿里云百炼视觉分析接口（接收 base64 图片）
-@app.route('/api/analyze_image', methods=['POST'])
-def analyze_image():
-    """调用阿里云百炼视觉模型分析商品图片"""
-    try:
-        data = request.get_json()
-        if not data or 'image_base64' not in data or 'mime_type' not in data:
-            return jsonify({'success': False, 'error': '请求体必须包含 image_base64 和 mime_type'}), 400
-        
-        image_base64 = data['image_base64']
-        mime_type = data['mime_type']  # 例如 image/jpeg, image/png
-        
-        # 检查 API Key
-        if not BAILIAN_API_KEY:
-            return jsonify({'success': False, 'error': '阿里云百炼 API Key 未配置'}), 500
-        
-        # 初始化 OpenAI 客户端（指向阿里云百炼兼容端点）
-        client = OpenAI(
-            api_key=BAILIAN_API_KEY,
-            base_url=BAILIAN_BASE_URL,
-        )
-        
-        # 构造消息：图片使用 data:image/...;base64,... 格式嵌入
-        messages = [
+    results.sort(key=lambda x: x["match_score"], reverse=True)
+    return results[:10]
+
+# ------------------ 缓存装饰器 ------------------
+async def cached_search(description: str, material: str) -> Optional[List[Dict]]:
+    cache_key = f"hs_search:{description}:{material}"
+    redis_client = app.state.redis
+    cached = await redis_client.get(cache_key)
+    if cached:
+        logger.info(f"缓存命中: {cache_key}")
+        return json.loads(cached)
+    # 查数据库（同步方法需在线程池中执行）
+    loop = asyncio.get_event_loop()
+    results = await loop.run_in_executor(None, search_in_database, description, material)
+    if results:
+        await redis_client.setex(cache_key, CACHE_TTL, json.dumps(results, ensure_ascii=False))
+    return results
+
+# ------------------ API 接口 ------------------
+@app.post("/api/search")
+async def search(request: SearchRequest):
+    """根据描述和材质查询 HS 编码（已去除实时爬虫）"""
+    start = time.time()
+    results = await cached_search(request.description, request.material)
+    elapsed = (time.time() - start) * 1000
+    logger.info(f"查询耗时 {elapsed:.2f}ms, 结果数: {len(results) if results else 0}")
+
+    if not results:
+        return {"status": "success", "results": []}
+
+    # 转换为 Pydantic 模型格式
+    return {
+        "status": "success",
+        "results": [
             {
-                "role": "system",
-                "content": (
-                    "你是一个专业的海关商品归类助手。请分析用户上传的商品图片，提取以下信息，"
-                    "并严格按照 JSON 格式返回，不要包含任何其他文字：\n\n"
-                    "{\n"
-                    '  "objects": [{"name": "物品名称", "confidence": 0.95}],\n'
-                    '  "materials": [{"name": "材质", "confidence": 0.9}],\n'
-                    '  "raw_description": "一段简短的中文描述，包含物品、材质、主要特征"\n'
-                    "}\n"
-                    "要求：objects 1-3个，materials 1-3种，只用中文。只返回 JSON。"
-                )
-            },
-            {
-                "role": "user",
-                "content": [
-                    {
-                        "type": "image_url",
-                        "image_url": {
-                            "url": f"data:{mime_type};base64,{image_base64}"
-                        }
-                    },
-                    {
-                        "type": "text",
-                        "text": "请分析这张商品图片，提取物品、材质和描述"
-                    }
-                ]
+                "hs_code": r["hs_code"],
+                "name": r["name"],
+                "description": r.get("description"),
+                "import_tax_rate": r.get("import_tax_rate"),
+                "general_import_tax_rate": r.get("general_import_tax_rate"),
+                "vat_rate": r.get("vat_rate"),
+                "export_rebate_rate": r.get("export_rebate_rate"),
+                "supervision_conditions": r.get("supervision_conditions"),
+                "supervision_description": r.get("supervision_description"),
+                "match_score": r["match_score"],
+                "match_reason": r["match_reason"],
             }
+            for r in results
         ]
-        
-        # 调用大模型
-        completion = client.chat.completions.create(
-            model=BAILIAN_MODEL,
-            messages=messages,
-            temperature=0.3,
-            max_tokens=500
+    }
+
+# ------------------ 图片分析（保留原有功能，增加熔断 + 异步） ------------------
+@app.post("/api/analyze_image")
+async def analyze_image(request: ImageAnalysisRequest):
+    """使用阿里云百炼视觉模型识别图片中的物体和材质（带熔断）"""
+    if not BAILIAN_API_KEY:
+        raise HTTPException(status_code=500, detail="BAILIAN_API_KEY 未配置")
+
+    # 构造阿里云百炼请求
+    url = "https://dashscope.aliyuncs.com/api/v1/services/aigc/multimodal-generation/generation"
+    headers = {
+        "Authorization": f"Bearer {BAILIAN_API_KEY}",
+        "Content-Type": "application/json"
+    }
+    data = {
+        "model": BAILIAN_MODEL,
+        "input": {
+            "messages": [
+                {
+                    "role": "user",
+                    "content": [
+                        {"image": f"data:{request.mime_type};base64,{request.image_base64}"},
+                        {"text": "请识别这张图片中的所有物体名称（中文）和可能的材质（如金属、塑料、木材等）。返回 JSON 格式，例如 {\"objects\":[{\"name\":\"椅子\",\"confidence\":0.95}], \"materials\":[{\"name\":\"木材\",\"confidence\":0.9}], \"raw_description\":\"一把木制椅子\"}"}
+                    ]
+                }
+            ]
+        },
+        "parameters": {"result_format": "message"}
+    }
+
+    try:
+        # 使用熔断器保护的异步请求
+        response = await circuit_breaker.call(
+            app.state.http_client.post, url, headers=headers, json=data
         )
-        
-        content = completion.choices[0].message.content.strip()
-        # 清洗可能出现的 markdown 代码块标记
-        content = re.sub(r'^```json\s*', '', content)
-        content = re.sub(r'\s*```$', '', content)
-        
-        analysis = json.loads(content)
-        # 确保必要字段存在
-        analysis.setdefault('objects', [])
-        analysis.setdefault('materials', [])
-        analysis.setdefault('raw_description', '')
-        
-        return jsonify({'success': True, 'analysis': analysis})
-    
-    except json.JSONDecodeError:
-        return jsonify({'success': False, 'error': 'AI 返回格式解析失败，请重试'}), 500
+        response.raise_for_status()
+        result = response.json()
+        # 解析百炼返回的文本（假设模型按约定返回 JSON）
+        output_text = result["output"]["choices"][0]["message"]["content"][0]["text"]
+        # 尝试提取 JSON
+        import re
+        json_match = re.search(r'\{.*\}', output_text, re.DOTALL)
+        if json_match:
+            analysis = json.loads(json_match.group())
+        else:
+            analysis = {"raw_description": output_text, "objects": [], "materials": []}
+        return {"success": True, "analysis": analysis}
+    except CircuitBreakerError:
+        logger.error("阿里云百炼 API 熔断触发")
+        raise HTTPException(status_code=503, detail="AI 服务暂时不可用（熔断）")
     except Exception as e:
-        return jsonify({'success': False, 'error': f'阿里云百炼 API 调用失败: {str(e)}'}), 500
+        logger.exception("图片分析失败")
+        raise HTTPException(status_code=500, detail=str(e))
 
-# 禁用 Excel 导入接口
-@app.route('/api/import_excel', methods=['POST'])
-def import_excel():
-    return jsonify({
-        'success': False,
-        'error': '导入功能已禁用。请使用命令行工具：python admin_import.py 文件.xlsx'
-    }), 403
+# ------------------ 健康检查 ------------------
+@app.get("/health")
+async def health():
+    return {"status": "ok"}
 
-# ============================================================
-# 启动（本地开发用，Railway 使用 gunicorn）
-# ============================================================
-if __name__ == '__main__':
-    print("=" * 50)
-    print("HS编码智能查询系统启动中...")
-    print(f"阿里云百炼 API: {'已配置' if BAILIAN_API_KEY else '❌ 未配置'}")
-    print("默认地址: http://127.0.0.1:5000")
-    print("=" * 50)
-    app.run(debug=True, host='0.0.0.0', port=5000)
+if __name__ == "__main__":
+    import uvicorn
+    uvicorn.run(app, host="0.0.0.0", port=int(os.getenv("PORT", 8000)))
