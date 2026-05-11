@@ -74,7 +74,7 @@ app = FastAPI(lifespan=lifespan)
 # CORS 允许前端任意域名（可改为你的前端地址）
 app.add_middleware(
     CORSMiddleware,
-    allow_origins=["*"],
+    allow_origins=["https://www.umtsh.com"],
     allow_credentials=True,
     allow_methods=["*"],
     allow_headers=["*"],
